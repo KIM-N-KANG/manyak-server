@@ -1,30 +1,28 @@
 package com.knk.manyak.chat.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.dto.CreateChatResponse
-import com.knk.manyak.chat.entity.ChatStatus
+import com.knk.manyak.chat.dto.ChatStatus
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 
@@ -39,10 +37,7 @@ import java.time.Instant
  * (4) 소유자 없는 스토리에 회원 요청은 발행 공개이면 201과 회원 소유 채팅, 그 밖에는 403,
  * (5) 비로그인 사용자의 공개 스토리 채팅 생성 = 아래 비로그인 201 한 건.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatCreateControllerIntegrationTests {
+class ChatCreateControllerIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

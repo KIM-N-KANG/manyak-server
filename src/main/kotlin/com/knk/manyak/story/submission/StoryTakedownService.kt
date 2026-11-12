@@ -1,12 +1,11 @@
 package com.knk.manyak.story.submission
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.service.AdminAuditService
-import com.knk.manyak.auth.entity.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.push.inbox.DomainNotificationRecorder
-import com.knk.manyak.story.entity.StoryTakedownReason
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
+import com.knk.manyak.auth.dto.UserStatus
+import com.knk.manyak.auth.service.AccountLockService
+import com.knk.manyak.story.dto.StoryTakedownReason
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.OfficialStoryAccount
 import com.knk.manyak.story.service.StoryTakedownStateService
@@ -59,11 +58,10 @@ data class StoryTakedownCleared(val storyId: UUID, val submissionId: UUID, val v
 @Service
 class StoryTakedownService(
     private val stories: StoryRepository,
-    private val users: UserRepository,
+    private val locks: AccountLockService,
     private val submissions: StorySubmissionRepository,
     private val official: OfficialStoryAccount,
     private val state: StoryTakedownStateService,
-    private val notifications: DomainNotificationRecorder,
     private val audits: AdminAuditService,
     private val mapper: ObjectMapper,
     private val events: ApplicationEventPublisher,
@@ -77,7 +75,7 @@ class StoryTakedownService(
         val ownerId = candidate.userId ?: conflict()
         entityManager.detach(candidate)
         // 결과 반영·소유자 수정·탈퇴와 같은 순서. 대상 상태는 잠금을 얻은 뒤 다시 읽는다.
-        val owner = users.findByIdForUpdate(ownerId) ?: conflict()
+        val owner = locks.lock(ownerId) ?: conflict()
         val story = stories.findByPublicIdForUpdate(storyId) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
         if (story.deletedAt != null || story.takenDownAt != null || story.userId != owner.id || owner.id == official.officialUserId()) conflict()
         val previous = story.visibility
@@ -98,10 +96,7 @@ class StoryTakedownService(
         val notified = owner.status != UserStatus.DELETED
         val event = StoryTakenDown(owner.id, story.publicId, UsernameTokenRenderer.render(story.title, story.protagonistName),
             request.reasonCode, request.reasonDetail, now)
-        if (notified) {
-            notifications.takenDown(event)
-            events.publishEvent(event)
-        }
+        if (notified) events.publishEvent(event)
         // 감사는 마지막 DB 작업이며 처리자의 권한도 재검사한다. 실패하면 위 변경 전체가 롤백된다.
         audits.recordChange(adminUserId, AdminAuditAction.STORY_TAKEN_DOWN, story.publicId.toString(), event.reason,
             mapper.valueToTree(mapOf("visibility" to previous)), mapper.valueToTree(mapOf(

@@ -1,25 +1,30 @@
 package com.knk.manyak.auth.controller
 
 import com.knk.manyak.auth.entity.SocialAccount
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.RandomNicknameGenerator
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.CreditPolicyKey
+import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
+import com.knk.manyak.global.observability.RequestCorrelationFilter
+import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
+import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.mockingDetails
+import org.mockito.Mockito.verify
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 
@@ -34,11 +39,7 @@ import java.time.Instant
  * refresh 저장은 Redis 인프라 없이 검증하기 위해 InMemoryRefreshTokenStore(@Primary)로 대체한다.
  * 가짜 배선을 [KakaoLoginIntegrationTests]와 같은 클래스로 두어 Spring 컨텍스트를 공유한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(FakeSocialLoginConfig::class)
-class GoogleLoginIntegrationTests {
+class GoogleLoginIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -57,6 +58,15 @@ class GoogleLoginIntegrationTests {
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
+
+    @Autowired
+    private lateinit var creditPolicyService: CreditPolicyService
+
+    @Autowired
+    private lateinit var serverAnalytics: ServerAnalytics
+
+    @Autowired
+    private lateinit var jdbc: JdbcTemplate
 
     @BeforeEach
     fun setUp() {
@@ -176,6 +186,58 @@ class GoogleLoginIntegrationTests {
         assertThat(rewards).hasSize(1)
         assertThat(rewards.first().idempotencyKey).isEqualTo("signup:$userId")
     }
+
+    @Test
+    fun `가입 보상은 정책 지급량과 가입 사유와 보상 신원 멱등 키로 원장에 한 번 남는다`() {
+        login("reward-ledger-sub").expectStatus().isOk
+
+        val userId = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "reward-ledger-sub")!!.userId
+        val expectedAmount = creditPolicyService.amountOf(CreditPolicyKey.SIGNUP_REWARD)
+        val ledger = creditTransactionRepository.findAll().filter { it.userId == userId }
+        assertThat(ledger).hasSize(1)
+        assertThat(ledger.single().amount).isEqualTo(expectedAmount)
+        assertThat(ledger.single().reason).isEqualTo(CreditReason.SIGNUP_REWARD)
+        assertThat(ledger.single().idempotencyKey).isEqualTo("signup:$userId")
+        assertThat(ledger.single().refType).isNull()
+        assertThat(ledger.single().refId).isNull()
+        assertThat(creditWalletService.balanceOf(userId)).isEqualTo(expectedAmount)
+    }
+
+    @Test
+    fun `가입 보상 저장이 실패하면 토큰 없이 실패를 전파하고 체험 스냅샷은 보상보다 먼저 기록된다`() {
+        jdbc.execute("ALTER TABLE credit_transactions ADD CONSTRAINT reward_test_failure CHECK (reason <> 'SIGNUP_REWARD')")
+        try {
+            login("reward-fail-sub", deviceId = "reward-fail-device")
+                .expectStatus().is5xxServerError
+                .expectBody().jsonPath("$.accessToken").doesNotExist()
+        } finally {
+            jdbc.execute("ALTER TABLE credit_transactions DROP CONSTRAINT reward_test_failure")
+        }
+
+        // 계정 생성은 독립 트랜잭션이라 남는다. 스냅샷이 보상보다 먼저라 완료 시각이 이미 기록돼 있다.
+        val userId = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "reward-fail-sub")!!.userId
+        val seededAt = userRepository.findById(userId).orElseThrow().memberTrialSeededAt
+        assertThat(seededAt).isNotNull()
+        assertThat(creditTransactionRepository.findAll()).isEmpty()
+        verify(serverAnalytics).socialLoginFailed("google", AnalyticsErrorType.SERVER)
+        assertThat(mockingDetails(serverAnalytics).invocations.count { it.method.name == "socialLoginSucceeded" }).isZero()
+
+        // 다음 로그인은 보상을 한 번 적립하고 토큰을 발급하며, 스냅샷은 다시 하지 않는다.
+        login("reward-fail-sub", deviceId = "reward-fail-device")
+            .expectStatus().isOk
+            .expectBody().jsonPath("$.accessToken").isNotEmpty
+        assertThat(userRepository.findById(userId).orElseThrow().memberTrialSeededAt).isEqualTo(seededAt)
+        val rewards = creditTransactionRepository.findAll().filter { it.userId == userId && it.reason == CreditReason.SIGNUP_REWARD }
+        assertThat(rewards.map { it.idempotencyKey }).containsExactly("signup:$userId")
+    }
+
+    private fun login(idToken: String, deviceId: String? = null) =
+        restTestClient.post()
+            .uri("/api/v1/auth/login/google")
+            .contentType(MediaType.APPLICATION_JSON)
+            .apply { if (deviceId != null) header(RequestCorrelationFilter.HEADER_DEVICE_ID, deviceId) }
+            .body("""{"idToken":"$idToken"}""")
+            .exchange()
 
     @Test
     fun `같은 사용자가 다시 로그인해도 가입 보상은 한 번만 적립된다`() {

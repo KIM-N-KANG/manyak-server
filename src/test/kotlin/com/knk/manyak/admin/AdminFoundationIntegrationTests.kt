@@ -1,26 +1,22 @@
 package com.knk.manyak.admin
 
-import com.knk.manyak.auth.controller.FakeSocialLoginConfig
+import com.knk.manyak.auth.dto.SocialProvider
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.entity.*
 import com.knk.manyak.auth.repository.*
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 
-@Import(FakeSocialLoginConfig::class, AdminProbeConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminFoundationIntegrationTests {
+class AdminFoundationIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var socials: SocialAccountRepository
@@ -49,18 +45,18 @@ class AdminFoundationIntegrationTests {
         return mapper.readTree(login(sub).expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)["accessToken"].asText()
     }
 
-    @Autowired private lateinit var audits: com.knk.manyak.admin.service.AdminAuditService
+    @Autowired private lateinit var audits: com.knk.manyak.adminkit.audit.AdminAuditService
     @Autowired private lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
-    private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
+    private lateinit var auditRepository: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
+    @Autowired
     private lateinit var events: com.knk.manyak.global.observability.StructuredLogger
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var analytics: com.knk.manyak.global.observability.analytics.ServerAnalytics
 
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     private lateinit var eligibility: com.knk.manyak.admin.service.AdminEligibilityService
-    @Autowired private lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
+    @Autowired private lateinit var withdrawal: com.knk.manyak.auth.service.UserWithdrawalService
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = ["withdraw", "suspend", "revoke"])
@@ -70,7 +66,7 @@ class AdminFoundationIntegrationTests {
         val passedFilter = java.util.concurrent.atomic.AtomicBoolean()
         org.mockito.Mockito.doAnswer { invocation ->
             val result = invocation.callRealMethod()
-            val checked = invocation.arguments[0] as? User
+            val checked = invocation.arguments[0] as? com.knk.manyak.auth.dto.AdminCandidate
             if (checked?.id == user.id && result == null && passedFilter.compareAndSet(false, true)) {
                 // 필터는 이미 ACTIVE+역할을 확인했다. 핸들러 실행 전에 별도 커밋으로 자격을 바꾼다.
                 when (change) {
@@ -89,10 +85,26 @@ class AdminFoundationIntegrationTests {
         assertThat(passedFilter).isTrue()
         // probe가 감사 직전에 쓴 nickname은 롤백되고, 자격 회수 트랜잭션의 값은 보존된다.
         assertThat(jdbc.queryForObject("SELECT nickname FROM users WHERE id = ?", String::class.java, user.id))
-            .isEqualTo(if (change == "withdraw") com.knk.manyak.user.service.UserWithdrawalService.ANONYMIZED_NICKNAME else "actor-race")
+            .isEqualTo(if (change == "withdraw") com.knk.manyak.auth.service.UserWithdrawalService.ANONYMIZED_NICKNAME else "actor-race")
         assertThat(jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, user.id))
             .isEqualTo(when (change) { "withdraw" -> "DELETED"; "suspend" -> "SUSPENDED"; else -> "ACTIVE" })
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_audit_logs", Long::class.java)).isZero()
+    }
+
+    @Autowired private lateinit var candidates: com.knk.manyak.auth.service.AdminCandidateQuery
+
+    @Test fun `관리자 필터의 회원 조회가 저장소 예외로 실패하면 원문 없이 500 공통 본문으로 응답한다`() {
+        val user = member("storage-down")
+        val token = adminToken(user)
+        org.mockito.Mockito.doThrow(org.springframework.dao.DataAccessResourceFailureException("sensitive storage detail"))
+            .`when`(candidates).byPublicId(user.publicId)
+        client.get().uri("/api/v1/admin/foundation-probe").header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isEqualTo(500).expectBody()
+            .jsonPath("$.status").isEqualTo(500)
+            .jsonPath("$.code").isEqualTo("INTERNAL_SERVER_ERROR")
+            .jsonPath("$.message").isEqualTo("서버 오류가 발생했습니다.")
+            .jsonPath("$.path").isEqualTo("/api/v1/admin/foundation-probe")
+            .jsonPath("$.result").doesNotExist()
     }
 
     @Test fun `변경 기록은 처리자 대상 전후 값과 응답과 같은 요청 ID를 보존한다`() {
@@ -124,11 +136,11 @@ class AdminFoundationIntegrationTests {
         val user = member("admin")
         val token = adminToken(user)
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("injected"))
-            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java)
-                ?: com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = user.id,
-                    category = com.knk.manyak.admin.entity.AdminAuditCategory.ACCESS,
-                    action = com.knk.manyak.admin.entity.AdminAuditAction.MEMBER_VIEWED,
-                    targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.MEMBER,
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java)
+                ?: com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = user.id,
+                    category = com.knk.manyak.adminkit.audit.AdminAuditCategory.ACCESS,
+                    action = com.knk.manyak.adminkit.audit.AdminAuditAction.MEMBER_VIEWED,
+                    targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.MEMBER,
                     targetId = user.publicId.toString(), requestId = "matcher"))
         client.put().uri("/api/v1/admin/foundation-probe").header("Authorization", "Bearer $token")
             .exchange().expectStatus().is5xxServerError
@@ -160,7 +172,7 @@ class AdminFoundationIntegrationTests {
             val tx = org.springframework.transaction.support.TransactionTemplate(transactionManager)
             org.assertj.core.api.Assertions.assertThatThrownBy {
                 tx.executeWithoutResult {
-                    audits.recordAccess(user.id, com.knk.manyak.admin.entity.AdminAuditAction.MEMBER_VIEWED, user.publicId.toString())
+                    audits.recordAccess(user.id, com.knk.manyak.adminkit.audit.AdminAuditAction.MEMBER_VIEWED, user.publicId.toString())
                     error("outer rollback")
                 }
             }.isInstanceOf(IllegalStateException::class.java)
@@ -170,7 +182,7 @@ class AdminFoundationIntegrationTests {
 
     @Test fun `변경 감사는 트랜잭션이 없으면 거부하고 사유와 JSON 한도를 검사한다`() {
         val user = member("admin")
-        val action = com.knk.manyak.admin.entity.AdminAuditAction.MEMBER_SUSPENDED
+        val action = com.knk.manyak.adminkit.audit.AdminAuditAction.MEMBER_SUSPENDED
         org.assertj.core.api.Assertions.assertThatThrownBy { audits.recordChange(user.id, action, user.publicId.toString(), "reason") }
             .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException::class.java)
         val tx = org.springframework.transaction.support.TransactionTemplate(transactionManager)

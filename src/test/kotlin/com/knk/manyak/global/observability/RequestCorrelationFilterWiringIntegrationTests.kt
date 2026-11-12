@@ -1,21 +1,16 @@
 package com.knk.manyak.global.observability
 
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
  * 필터가 실제 서블릿 체인에 등록되어 모든 요청에 동작하는지 검증한다.
  * 비즈니스 로직과 무관하게 항상 200인 actuator health로 echo 동작만 확인한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class RequestCorrelationFilterWiringIntegrationTests {
+class RequestCorrelationFilterWiringIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

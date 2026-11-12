@@ -1,20 +1,21 @@
 package com.knk.manyak.push.outbox
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
+import com.knk.manyak.push.dto.PushCampaignStatus
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.*
 import com.knk.manyak.push.service.*
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Clock
 import java.time.ZoneOffset
@@ -22,15 +23,15 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-@ActiveProfiles("test")
-@SpringBootTest(properties = ["manyak.push.mode=remote"])
-class ScheduledPushOutboxIntegrationTests {
-    @MockitoBean private lateinit var store: PushOutboxStore
-    @MockitoBean private lateinit var relay: PushOutboxRelay
-    @MockitoBean private lateinit var sender: FcmPushSender
+class ScheduledPushOutboxIntegrationTests : PushRemoteIntegrationTest() {
+    @Autowired private lateinit var store: PushOutboxStore
+    @Autowired private lateinit var relay: PushOutboxRelay
+    @Autowired private lateinit var sender: FcmPushSender
     @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var storyReader: com.knk.manyak.story.service.StoryPlayReader
+    @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var templateRows: PushMessageTemplateRepository
     @Autowired private lateinit var templateService: PushMessageTemplateService
     @Autowired private lateinit var attendance: AttendanceReminderService
@@ -81,7 +82,7 @@ class ScheduledPushOutboxIntegrationTests {
     @Test fun `원격 프로모션은 야간 미동의 회원도 요청을 기록하고 소비자에게 판정을 맡긴다`() {
         val campaign = campaigns.save(PushCampaign(title = "새 소식", body = "확인해 보세요", scheduledAt = Instant.EPOCH))
         val night = Instant.parse("2026-10-17T13:00:00Z") // KST 22:00
-        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(night, ZoneOffset.UTC), writer, notifications = notifications, notices = notices)
+        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader, Clock.fixed(night, ZoneOffset.UTC), writer, notifications = notifications, notices = noticeService)
         val result = service.sendDue(night).single()
         assertThat(result.sent).isEqualTo(3)
         assertThat(messages).hasSize(3)
@@ -125,8 +126,8 @@ class ScheduledPushOutboxIntegrationTests {
         val body = "가".repeat(300)
         val campaign = campaigns.save(PushCampaign(title = "소식", body = body, scheduledAt = Instant.EPOCH))
         val day = Instant.parse("2026-10-17T00:00:00Z")
-        val service = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(day, ZoneOffset.UTC),
-            if (remote) writer else null, notifications = notifications, notices = notices)
+        val service = PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader, Clock.fixed(day, ZoneOffset.UTC),
+            if (remote) writer else null, notifications = notifications, notices = noticeService)
         assertThat(service.sendDue(day).single().sent).isEqualTo(3)
         val expected = "$body\n수신거부: 마이 > 알림 설정"
         assertThat(expected).hasSize(317)
@@ -152,7 +153,7 @@ class ScheduledPushOutboxIntegrationTests {
         templateService.refresh()
         try {
             val day = Instant.parse("2026-10-17T00:00:00Z")
-            val service = AttendanceReminderService(users, templateService, sender, Clock.fixed(day, ZoneOffset.UTC),
+            val service = AttendanceReminderService(AccountQueryService(users), templateService, sender, Clock.fixed(day, ZoneOffset.UTC),
                 outbox = if (remote) writer else null, notifications = notifications)
             assertThat(service.sendReminders().sent).isEqualTo(3)
             assertThat(jdbc.queryForList("SELECT body FROM user_notifications", String::class.java)).containsOnly(body)
@@ -237,7 +238,7 @@ class ScheduledPushOutboxIntegrationTests {
         val serviceOnly = users.save(User(nickname = "서비스만", servicePushEnabled = true))
         tokens.save(DevicePushToken(userId = serviceOnly.id, token = "service-only", platform = PushPlatform.ANDROID))
         for (kind in listOf(com.knk.manyak.push.dto.PushKind.SERVICE, com.knk.manyak.push.dto.PushKind.MARKETING)) {
-            val notice = notices.saveAndFlush(com.knk.manyak.notice.entity.Notice(title = "공지", body = "평문", tag = if (kind == com.knk.manyak.push.dto.PushKind.SERVICE) com.knk.manyak.notice.entity.NoticeTag.UPDATE else com.knk.manyak.notice.entity.NoticeTag.EVENT, createdByUserId = all.first().id, status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED))
+            val notice = notices.saveAndFlush(com.knk.manyak.notice.entity.Notice(title = "공지", body = "평문", tag = if (kind == com.knk.manyak.push.dto.PushKind.SERVICE) com.knk.manyak.notice.dto.NoticeTag.UPDATE else com.knk.manyak.notice.dto.NoticeTag.EVENT, createdByUserId = all.first().id, status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED))
             val campaign = campaigns.save(PushCampaign(title = "공지 제목", body = "공지 알림", scheduledAt = Instant.EPOCH, kind = kind, noticeId = notice.id, noticeTag = notice.tag))
             messages.clear()
             assertThat(promotion.sendDue(Instant.now()).single().sent).isEqualTo(3)

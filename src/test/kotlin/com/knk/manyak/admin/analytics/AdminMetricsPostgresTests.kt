@@ -1,15 +1,12 @@
 package com.knk.manyak.admin.analytics
 
+import com.knk.manyak.support.SharedPostgres
 import com.knk.manyak.admin.config.AdminDashboardProperties
 import com.knk.manyak.admin.dto.AdminChartsRequest
 import org.assertj.core.api.Assertions.assertThat
-import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.Test
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import java.time.*
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.MockResponse
@@ -19,13 +16,9 @@ import tools.jackson.module.kotlin.kotlinModule
 
 class AdminMetricsPostgresTests {
     @Test fun `실제 PostgreSQL도 KST 경계 최초 연동 팀 제외와 누락 토큰 원가를 집계한다`() {
-        val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD","metrics-test").withExposedPorts(5432)
-            .waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n",2))
         val langfuse = MockWebServer().apply { start() }
         try {
-            pg.start()
-            val ds=DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres","postgres","metrics-test")
-            Flyway.configure().dataSource(ds).locations("classpath:db/migration").load().migrate()
+            val ds=SharedPostgres.database(migrated = true)
             val jdbc=JdbcTemplate(ds)
             val member=jdbc.queryForObject("INSERT INTO users(nickname,created_at,migrated_at) VALUES ('member','2026-10-20T15:00:00Z','2026-10-20T16:00:00Z') RETURNING id",Long::class.java)!!
             val team=jdbc.queryForObject("INSERT INTO users(nickname,created_at) VALUES ('team','2026-10-20T15:00:00Z') RETURNING id",Long::class.java)!!
@@ -80,6 +73,6 @@ class AdminMetricsPostgresTests {
             val restarted = AdminAiCostService(repository, LangfuseCostSnapshots(store, LangfuseMetricsClient(props, mapper), props, mapper, clock), AdminAiCostProperties(traceFeatures = mapOf("채팅 턴" to "chat_response", "스토리 컴파일" to "story_completion")), clock)
             assertThat(restarted.aiCost(q).totals).isEqualTo(withImages.totals)
             assertThat(langfuse.requestCount).isEqualTo(1)
-        } finally { pg.stop(); langfuse.shutdown() }
+        } finally { langfuse.shutdown() }
     }
 }

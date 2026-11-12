@@ -1,11 +1,11 @@
 package com.knk.manyak.auth.social
 
-import com.knk.manyak.user.consent.UserConsentRequest
-import com.knk.manyak.user.consent.UserConsentService
+import com.knk.manyak.auth.consent.UserConsentRequest
+import com.knk.manyak.auth.consent.UserConsentService
 import com.knk.manyak.auth.entity.SocialAccount
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import org.springframework.dao.DataIntegrityViolationException

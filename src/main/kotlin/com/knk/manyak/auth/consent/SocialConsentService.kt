@@ -1,17 +1,17 @@
 package com.knk.manyak.auth.consent
 
 import com.knk.manyak.auth.dto.TokenResponse
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
+import com.knk.manyak.auth.dto.wireValue
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.social.SocialAccountRegistrar
 import com.knk.manyak.auth.social.SocialLoginService
 import com.knk.manyak.auth.social.SocialUserInfo
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
+import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
-import com.knk.manyak.user.consent.UserConsentRequest
-import com.knk.manyak.user.consent.UserConsentService
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -73,7 +73,7 @@ class SocialConsentService(
         val errorType = if (ex is CodedResponseStatusException && ex.statusCode == HttpStatus.BAD_REQUEST &&
             (ex.errorCode == ApiErrorCodes.CONSENT_VERSION_MISMATCH || ex.errorCode == ApiErrorCodes.CONSENT_REQUIRED_MISSING)
         ) AnalyticsErrorType.VALIDATION else AnalyticsErrorType.SERVER
-        analytics.socialLoginFailed(provider, errorType)
+        analytics.socialLoginFailed(provider.wireValue, errorType)
         throw ex
     }
 

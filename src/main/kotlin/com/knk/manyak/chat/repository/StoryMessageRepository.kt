@@ -1,6 +1,6 @@
 package com.knk.manyak.chat.repository
 
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository

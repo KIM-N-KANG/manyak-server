@@ -3,16 +3,14 @@ package com.knk.manyak.admin.infra
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.support.AdminMetricsIntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.admin.analytics.MutableAnalyticsClock
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import software.amazon.awssdk.services.cloudwatch.CloudWatchClient
 import software.amazon.awssdk.services.cloudwatch.model.*
@@ -21,22 +19,17 @@ import software.amazon.awssdk.services.ecs.model.*
 import tools.jackson.databind.ObjectMapper
 import java.time.*
 
-@AutoConfigureRestTestClient
-@org.springframework.context.annotation.Import(InfraApiClock::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = [
-    "manyak.admin.infra.cluster=private-cluster", "manyak.admin.infra.services=server=private-server,ai=private-ai,notification=private-notification",
-    "manyak.admin.infra.load-balancer=private-alb", "manyak.admin.infra.database=private-rds", "manyak.admin.infra.cache-clusters=redis-001,redis-002",
-    "manyak.admin.infra.domain=private-domain", "manyak.admin.infra.account-id=123456789012"])
-class InfraMetricsIntegrationTests {
+class InfraMetricsIntegrationTests : AdminMetricsIntegrationTest() {
+    override val clockAt: java.time.Instant = java.time.Instant.parse("2026-10-23T00:00:00Z")
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var clock: MutableAnalyticsClock
-    @MockitoBean private lateinit var repository: InfraDatabaseRepository
-    @MockitoBean private lateinit var cw: CloudWatchClient
-    @MockitoBean private lateinit var ecs: EcsClient
+    @Autowired private lateinit var repository: InfraDatabaseRepository
+    @Autowired private lateinit var cw: CloudWatchClient
+    @Autowired private lateinit var ecs: EcsClient
     private val mapper = ObjectMapper()
     @Test fun `인프라 두 API는 권한 날짜 개수 노출 캐시 실패 격리 계약을 따른다`() {
         cleaner.cleanAll()
@@ -123,8 +116,4 @@ class InfraMetricsIntegrationTests {
         for (path in listOf("/infra/metrics", "/infra/db-tables")) get(path).expectStatus().isForbidden
     }
 }
-@org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
-class InfraApiClock {
-    @org.springframework.context.annotation.Bean @org.springframework.context.annotation.Primary
-    fun infraClock() = MutableAnalyticsClock(Instant.parse("2026-10-23T00:00:00Z"))
-}
+

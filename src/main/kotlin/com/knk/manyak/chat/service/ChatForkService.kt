@@ -1,11 +1,13 @@
 package com.knk.manyak.chat.service
 
 import com.knk.manyak.chat.dto.ChatPersonaResponse
+import com.knk.manyak.chat.dto.ChatStatus
 import com.knk.manyak.chat.dto.CreateChatResponse
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.*
 import com.knk.manyak.chat.repository.*
-import com.knk.manyak.global.security.SuspensionGuard
-import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.auth.security.SuspensionGuard
+import com.knk.manyak.story.service.StoryPlayReader
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Isolation
@@ -20,7 +22,7 @@ class ChatForkService(
     private val choices: StoryChoiceRepository,
     private val summaries: StoryChatSummaryRepository,
     private val events: StoryChatMainEventRepository,
-    private val stories: StoryRepository,
+    private val stories: StoryPlayReader,
     private val suspension: SuspensionGuard,
 ) {
     /** 원본의 잠금이나 생성 중 선점 없이 커밋된 한 스냅샷을 복사한다. */
@@ -80,8 +82,8 @@ class ChatForkService(
             .filter { it.invalidatedAt == null && it.throughTurn <= targetTurn }
             .map { StoryChatSummary(chatId = copy.id, throughTurn = it.throughTurn, summary = it.summary, createdAt = it.createdAt) })
         events.saveAll(events.findByChatId(source.id).map { StoryChatMainEvent(chatId = copy.id, mainEventId = it.mainEventId, createdAt = it.createdAt) })
-        val story = stories.findById(source.storyId).orElseThrow { notFound() }
-        return CreateChatResponse(id = copy.publicId.toString(), storyId = story.publicId.toString(),
+        val storyPublicId = stories.findPublicId(source.storyId) ?: throw notFound()
+        return CreateChatResponse(id = copy.publicId.toString(), storyId = storyPublicId.toString(),
             persona = copy.personaNameSnapshot?.let(::ChatPersonaResponse), prologue = copy.storyPrologueSnapshot.orEmpty(),
             suggestedInputs = emptyList(), model = copy.modelCode, longResponse = copy.longResponse, createdAt = copy.createdAt)
     }

@@ -1,30 +1,28 @@
 package com.knk.manyak.push.outbox
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.*
-import com.knk.manyak.story.service.SimpleStoryCreationService
+import com.knk.manyak.story.service.SimpleStoryCompletionService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.UUID
 
 /** H2에서는 실제 완성·replay와 동기 기록 호출의 트랜잭션 경계를 확인하고 SQL 자체는 PG 테스트로 검증한다. */
-@ActiveProfiles("test")
-@SpringBootTest(properties = ["manyak.ai.story.stub=true", "manyak.push.mode=remote"])
-class StoryCompletionOutboxIntegrationTests {
-    @MockitoBean private lateinit var store: PushOutboxStore
-    @MockitoBean private lateinit var relay: PushOutboxRelay
-    @Autowired private lateinit var service: SimpleStoryCreationService
+class StoryCompletionOutboxIntegrationTests : PushRemoteIntegrationTest() {
+    @Autowired private lateinit var store: PushOutboxStore
+    @Autowired private lateinit var relay: PushOutboxRelay
+    @Autowired private lateinit var service: SimpleStoryCompletionService
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var sessions: StoryCreationSessionRepository
     @Autowired private lateinit var storylines: StoryCreationStorylineRepository

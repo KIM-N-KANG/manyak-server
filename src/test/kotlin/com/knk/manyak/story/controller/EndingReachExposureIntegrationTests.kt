@@ -1,7 +1,7 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
@@ -9,23 +9,21 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryStartSetting
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.entity.UserStoryEndingReach
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -35,10 +33,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * - POST /chats/batch 카드의 reachedEndings는 채팅 도달 엔딩(이름).
  * - POST /auth/migrate로 이관한 게스트 채팅의 도달분이 회원 집계에 백필된다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class EndingReachExposureIntegrationTests {
+class EndingReachExposureIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository

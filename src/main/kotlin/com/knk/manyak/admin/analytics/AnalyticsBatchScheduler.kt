@@ -19,7 +19,7 @@ class AnalyticsBatchScheduler(private val runner: AnalyticsBatchRunner, private 
     fun run() {
         if (!running.compareAndSet(false, true)) return
         val started = System.nanoTime()
-        val now = clock.instant().atZone(com.knk.manyak.admin.dto.AdminDateRange.KST)
+        val now = clock.instant().atZone(com.knk.manyak.adminkit.query.AdminDateRange.KST)
         val phase = if (now.toLocalTime() >= policy.nightlyStart) "nightly" else "backfill"
         fun record(result: AnalyticsBatchResult) = log.event("admin_analytics_backfill", mapOf(
             "phase" to result.phase, "result" to result.result, "reason" to result.reason, "keys" to result.keys,

@@ -12,13 +12,13 @@ import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.entity.StoryCreationCharacter
-import com.knk.manyak.story.entity.StoryCreationCharacterRole
+import com.knk.manyak.story.dto.StoryCreationCharacterRole
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationSessionTag
 import com.knk.manyak.story.entity.StoryCreationTag
-import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.dto.StoryCreationTagSource
 import com.knk.manyak.story.repository.StoryCreationStorylineRecommendedInfoRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
@@ -30,27 +30,24 @@ import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.transaction.support.TransactionSynchronizationManager
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class StoryControllerIntegrationTests {
+class StoryControllerIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.story = scriptedTestConfigStoryAiClient
+    }
+
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -85,8 +82,7 @@ class StoryControllerIntegrationTests {
     @Autowired
     private lateinit var storySuggestedInputRepository: StorySuggestedInputRepository
 
-    @Autowired
-    private lateinit var storyAiClient: CapturingStoryAiClient
+    private val storyAiClient = scriptedTestConfigStoryAiClient
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
@@ -263,6 +259,38 @@ class StoryControllerIntegrationTests {
         check(storylineRequest.supportingCharacters.single().name == "레온")
         check(storylineRequest.supportingCharacters.single().gender == "MALE")
         check(storylineRequest.supportingCharacters.single().features == listOf("비밀스러운 조력자", "헌신적인"))
+    }
+
+    @Autowired private lateinit var trialLimits: com.knk.manyak.credit.service.GuestTrialLimitService
+
+    @Test
+    fun `스토리라인 저장이 실패해도 직접 입력 특징 태그 행은 남고 게스트 횟수를 복원하며 요청을 실패로 남긴다`() {
+        // KNK-2056 T4. 직접 입력 태그 마스터 행은 별도 트랜잭션(REQUIRES_NEW)이라 스토리라인 저장이 롤백돼도 남는다(STORY 5-2-4).
+        val genre = seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
+        org.mockito.Mockito.doThrow(IllegalStateException("추천 정보 저장 실패(테스트)")).`when`(recommendedInfoRepository)
+            .saveAll(org.mockito.ArgumentMatchers.anyIterable<com.knk.manyak.story.entity.StoryCreationStorylineRecommendedInfo>())
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "t4-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "genreTagIds": [${genre.id}],
+                  "protagonist": { "name": "아린", "gender": "FEMALE", "featureTagIds": [], "customTags": ["직접입력특징"] },
+                  "supportingCharacters": []
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().is5xxServerError
+
+        check(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM story_creation_tags WHERE name = '직접입력특징' AND tag_source = 'CUSTOM'", Long::class.java) == 1L)
+        check(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM story_creation_sessions", Long::class.java) == 0L)
+        check(trialLimits.usage(null, "t4-device", com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORYLINE_GENERATION).used == 0L)
+        check(jdbcTemplate.queryForList("SELECT status FROM story_creation_requests WHERE stage = 'STORYLINE_GENERATION'", String::class.java) == listOf("FAILED"))
     }
 
     @Test
@@ -866,6 +894,41 @@ class StoryControllerIntegrationTests {
             .jsonPath("$.path").isEqualTo("/api/v1/stories/simple/storylines")
     }
 
+    @Autowired private lateinit var refundLogger: com.knk.manyak.global.observability.StructuredLogger
+    @Autowired private lateinit var refundRedis: org.springframework.data.redis.core.StringRedisTemplate
+    @Autowired private lateinit var refundMeters: io.micrometer.core.instrument.MeterRegistry
+
+    @Test
+    fun `AI 서버 오류에서 게스트 횟수 복원이 실패해도 원래 502로 응답하고 환불 실패를 기록한다`() {
+        // KNK-2081, STORY 4-1-11 "되돌리기가 실패해도 원래 실패로 응답하고 기록". 지금은 복원 예외가 502를 덮어 500이 된다.
+        val genre = seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
+        storyAiClient.fail = true
+        // 게스트 스토리라인 카운터의 복원 스크립트(인자 없는 호출)만 실패시킨다. 예약(인자 1개)은 그대로 둔다.
+        org.mockito.Mockito.doThrow(org.springframework.data.redis.RedisConnectionFailureException("redis down(test)")).`when`(refundRedis).execute(
+            org.mockito.Mockito.any(org.springframework.data.redis.core.script.RedisScript::class.java),
+            org.mockito.ArgumentMatchers.argThat<List<String>> { it != null && it.size == 1 && it[0].startsWith("guest_trial:") && it[0].endsWith(":storyline_generation") },
+        )
+        fun failures() = refundMeters.find("manyak.story.creation.refund").tag("outcome", "failure").counter()?.count() ?: 0.0
+        val before = failures()
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "refund-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body("""{"requestId":"${java.util.UUID.randomUUID()}","genreTagIds":[${genre.id}],"protagonist":{}}""")
+            .exchange()
+            .expectStatus().isEqualTo(502)
+            .expectBody().jsonPath("$.code").isEqualTo("BAD_GATEWAY")
+
+        check(failures() == before + 1)
+        val logs = org.mockito.Mockito.mockingDetails(refundLogger).invocations
+            .filter { it.method.name == "event" && it.arguments[0] == "story_creation_refund_failed" && it.arguments[1] is Map<*, *> }
+            .map { it.arguments[1] }
+        check(logs == listOf(mapOf("stage" to "storyline_generation", "requester" to "guest", "creation_id" to null, "error" to "RedisConnectionFailureException"))) { logs.toString() }
+        check(trialLimits.usage(null, "refund-device", com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORYLINE_GENERATION).used == 1L)
+        check(jdbcTemplate.queryForList("SELECT status FROM story_creation_requests WHERE stage = 'STORYLINE_GENERATION'", String::class.java) == listOf("FAILED"))
+    }
+
     @Test
     fun `스토리라인 생성 API는 Bad Gateway 응답을 문서화한다`() {
         restTestClient.get()
@@ -1303,10 +1366,7 @@ class StoryControllerIntegrationTests {
             ),
         )
 
-    @TestConfiguration
     class TestConfig {
-        @Bean
-        @Primary
         fun storyAiClient(): CapturingStoryAiClient = CapturingStoryAiClient()
     }
 
@@ -1392,3 +1452,5 @@ class StoryControllerIntegrationTests {
         }
     }
 }
+
+private val scriptedTestConfigStoryAiClient = StoryControllerIntegrationTests.TestConfig().storyAiClient()

@@ -2,15 +2,17 @@ package com.knk.manyak.notice
 
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.notice.dto.NoticeStatus
+import com.knk.manyak.notice.dto.NoticeTag
 import com.knk.manyak.notice.entity.*
 import com.knk.manyak.notice.repository.NoticeRepository
 import com.knk.manyak.notice.service.NoticeService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.transaction.IllegalTransactionStateException
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
@@ -20,8 +22,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
-@SpringBootTest
-class NoticeNotificationConnectionIntegrationTests {
+class NoticeNotificationConnectionIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var notices: NoticeRepository
     @Autowired private lateinit var service: NoticeService
     @Autowired private lateinit var users: UserRepository

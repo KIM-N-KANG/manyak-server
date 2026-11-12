@@ -1,11 +1,9 @@
 package com.knk.manyak.auth.consent
 
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.social.SocialAccountRegistrar
 import com.knk.manyak.auth.social.SocialLoginService
 import com.knk.manyak.auth.social.SocialUserInfo
-import com.knk.manyak.user.consent.UserConsentRequest
-import com.knk.manyak.user.consent.UserConsentService
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.Test
@@ -34,7 +32,7 @@ class SocialConsentServiceTest {
         assertThat(error.stackTraceToString()).doesNotContain("private-sub", "private@example.com")
         verify(codes, never()).consume("code")
         verifyNoInteractions(login)
-        verify(analytics).socialLoginFailed(SocialProvider.GOOGLE, com.knk.manyak.global.observability.analytics.AnalyticsErrorType.SERVER)
+        verify(analytics).socialLoginFailed("google", com.knk.manyak.global.observability.analytics.AnalyticsErrorType.SERVER)
     }
 
     @Test fun `검증기 오류의 ID 토큰 원문과 cause도 노출하지 않는다`() {
@@ -53,7 +51,7 @@ class SocialConsentServiceTest {
             .thenThrow(org.springframework.dao.DataAccessResourceFailureException("db unavailable"))
         val error = catchThrowable { service.start(SocialProvider.KAKAO, "token", null) }
         assertThat(error).isInstanceOf(ResponseStatusException::class.java).hasNoCause()
-        verify(analytics).socialLoginFailed(SocialProvider.KAKAO, com.knk.manyak.global.observability.analytics.AnalyticsErrorType.SERVER)
+        verify(analytics).socialLoginFailed("kakao", com.knk.manyak.global.observability.analytics.AnalyticsErrorType.SERVER)
         verifyNoMoreInteractions(analytics)
     }
 
@@ -85,7 +83,7 @@ class SocialConsentServiceTest {
         }
 
         assertThat(catchThrowable { service.complete("code", request, null) }).isSameAs(expected)
-        verify(analytics).socialLoginFailed(SocialProvider.KAKAO,
+        verify(analytics).socialLoginFailed("kakao",
             com.knk.manyak.global.observability.analytics.AnalyticsErrorType.VALIDATION)
         verifyNoMoreInteractions(analytics)
         verify(codes, never()).consume("code")

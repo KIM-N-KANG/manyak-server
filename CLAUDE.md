@@ -72,6 +72,7 @@
 - 마이그레이션 검증은 `scripts/gen-db-docs.sh` 경로(실 PostgreSQL에 Flyway 적용)로 하고, 재생성된 `dbdoc/`을 함께 커밋합니다. PR 본문에 이 대체 검증 방법을 명시합니다.
 - 테스트 격리는 `build.gradle.kts`의 `tasks.withType<Test>`가 빌드로 강제합니다(프로파일 test 강제 + 실 DB env 차단). 회귀 가드는 `TestDatasourceIsolationGuardTests.kt`이며, 이 장치를 약화시키지 않습니다.
 - PostgreSQL `RENAME COLUMN`은 인덱스 카탈로그에 옛 컬럼명을 남기므로, rename된 컬럼을 덮는 UNIQUE/인덱스는 마이그레이션에서 DROP+ADD로 재생성합니다.
+- 모듈 경계 가드 `ModuleBoundaryTests`는 R1(다른 모듈의 리포지토리와 엔티티 직접 참조), R2(모듈 간 순환 간선), G(global→도메인) 위반이 **하나라도 있으면 실패**하고 위반 줄을 출력합니다(KNK-2080에서 셋 다 0이 되어 기준 파일과 갱신 모드를 없앴습니다). 다른 모듈의 값이 필요하면 그 모듈이 결과 타입을 돌려주는 조회 서비스, 잠금 진입점, 명령을 두고 호출합니다. 아래 모듈이 위 모듈을 알아야 하면 아래 모듈이 인터페이스나 이벤트를 정의합니다(BE-061). 쿼리 문자열로 다른 모듈의 엔티티 이름을 새로 참조해 가드를 우회하지 않습니다.
 
 ### DB 스키마 문서
 

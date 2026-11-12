@@ -1,10 +1,10 @@
 package com.knk.manyak.chat.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryMessageRepository
@@ -12,21 +12,16 @@ import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.UUID
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatDeleteControllerIntegrationTests {
+class ChatDeleteControllerIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

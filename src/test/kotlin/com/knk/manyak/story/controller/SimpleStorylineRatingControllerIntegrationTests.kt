@@ -3,25 +3,20 @@ package com.knk.manyak.story.controller
 import com.knk.manyak.story.dto.StorylineRating
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.repository.StoryCreationStorylineRatingRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class SimpleStorylineRatingControllerIntegrationTests {
+class SimpleStorylineRatingControllerIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

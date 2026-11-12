@@ -1,13 +1,16 @@
 package com.knk.manyak.push.inbox
 
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
+import com.knk.manyak.support.PushRemoteIntegrationTest
+import org.springframework.test.context.TestPropertySource
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.push.dto.PushKind
 import com.knk.manyak.push.entity.PushCampaign
-import com.knk.manyak.push.entity.PushCampaignStatus
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.outbox.PushOutboxRelay
 import com.knk.manyak.push.outbox.PushOutboxStore
 import com.knk.manyak.push.repository.PushCampaignRepository
@@ -20,15 +23,14 @@ import com.knk.manyak.story.submission.SubmissionStatus
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationStoryline
-import com.knk.manyak.story.entity.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
-import com.knk.manyak.story.service.SimpleStoryCreationService
+import com.knk.manyak.story.service.SimpleStoryCompletionService
 import org.mockito.Mockito.*
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.AfterEach
@@ -36,34 +38,30 @@ import org.slf4j.MDC
 import com.knk.manyak.global.observability.MdcKeys
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
 
-@ActiveProfiles("test")
-abstract class NotificationRecordingIntegrationTests {
-    @MockitoBean(name = "pushExecutor") private lateinit var pushExecutor: java.util.concurrent.Executor
-    @MockitoBean private lateinit var sender: FcmPushSender
-    @MockitoBean private lateinit var outbox: PushOutboxStore
-    @MockitoBean private lateinit var relay: PushOutboxRelay
-    @MockitoSpyBean private lateinit var inbox: UserNotificationStore
-    @Autowired private lateinit var creation: SimpleStoryCreationService
+abstract class NotificationRecordingIntegrationTests : MockedBoundaryIntegrationTest() {
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("pushExecutor") private lateinit var pushExecutor: java.util.concurrent.Executor
+    @Autowired private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var outbox: PushOutboxStore
+    @Autowired private lateinit var relay: PushOutboxRelay
+    @Autowired private lateinit var inbox: UserNotificationStore
+    @Autowired private lateinit var creation: SimpleStoryCompletionService
     @Autowired private lateinit var sessions: StoryCreationSessionRepository
     @Autowired private lateinit var storylines: StoryCreationStorylineRepository
-    @MockitoSpyBean private lateinit var requests: StoryCreationRequestRepository
+    @Autowired private lateinit var requests: StoryCreationRequestRepository
     @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var campaignService: com.knk.manyak.push.service.AdminCampaignService
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jdbc: JdbcTemplate
-    @MockitoSpyBean private lateinit var recorder: DomainNotificationRecorder
-    @Autowired private lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
+    @Autowired private lateinit var recorder: DomainNotificationRecorder
+    @Autowired private lateinit var withdrawal: com.knk.manyak.auth.service.UserWithdrawalService
     @Autowired private lateinit var tx: TransactionTemplate
     @Autowired private lateinit var attendance: AttendanceReminderService
     @Autowired private lateinit var promotion: PromotionPushService
@@ -176,6 +174,9 @@ abstract class NotificationRecordingIntegrationTests {
         creation.createSimpleStory(request, user.id)
         assertThat(rows()).hasSize(1)
         assertThat(requests.findByRequestId(request.requestId)!!.status).isEqualTo(StoryCreationRequestStatus.COMPLETED)
+        // 내역은 충돌 무시 삽입이라 행 수로는 이중 기록을 못 잡는다. 기록기는 이벤트 구독으로 한 번만 불린다.
+        val recorderSpy = org.springframework.test.util.AopTestUtils.getUltimateTargetObject<DomainNotificationRecorder>(recorder)
+        assertThat(mockingDetails(recorderSpy).invocations.count { it.method.name == "completed" }).isEqualTo(1)
     }
 
     @Test fun `내역 삽입 실패는 실제 완성 요청의 완료 기록도 롤백한다`() {
@@ -187,6 +188,8 @@ abstract class NotificationRecordingIntegrationTests {
             .hasRootCauseMessage("inbox unavailable")
         assertThat(requests.findByRequestId(request.requestId)!!.status).isEqualTo(StoryCreationRequestStatus.PENDING)
         assertThat(rows()).isEmpty()
+        // 내역이 아웃박스보다 먼저 기록된다(NOTIFICATION 4-1-6). remote도 아웃박스를 시도하지 않고 local은 발송이 없다.
+        verifyNoInteractions(sender, outbox)
     }
 
     @Test fun `게스트 완성은 내역을 기록하지 않는다`() {
@@ -206,14 +209,14 @@ abstract class NotificationRecordingIntegrationTests {
     }
 
     @Test fun `배포 전 공지는 소급하지 않고 공지 링크 태그와 캠페인 UTM은 사본으로 남는다`() {
-        val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "내용", tag = com.knk.manyak.notice.entity.NoticeTag.UPDATE,
-            status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED, createdByUserId = user.id))
+        val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "내용", tag = com.knk.manyak.notice.dto.NoticeTag.UPDATE,
+            status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED, createdByUserId = user.id))
         promotion.sendDue(Instant.now())
         assertThat(rows()).isEmpty()
         val campaign = campaigns.save(PushCampaign(title = notice.title, body = notice.body, kind = PushKind.SERVICE,
             noticeId = notice.id, noticeTag = notice.tag, scheduledAt = Instant.EPOCH))
         promotion.sendDue(Instant.now())
-        notice.status = com.knk.manyak.notice.entity.NoticeStatus.DRAFT
+        notice.status = com.knk.manyak.notice.dto.NoticeStatus.DRAFT
         notice.title = "바뀐 공지"
         notices.saveAndFlush(notice)
         val row = rows().single()
@@ -288,7 +291,7 @@ abstract class NotificationRecordingIntegrationTests {
 
     @Test fun `PROMOTION 공지는 연결한 캠페인에서 동의자만 태그와 원문 제목을 기록한다`() {
         member(marketing = false)
-        val notice = publishNotice(com.knk.manyak.notice.entity.NoticeTag.PROMOTION)
+        val notice = publishNotice(com.knk.manyak.notice.dto.NoticeTag.PROMOTION)
         promotion.sendDue(Instant.now())
         val row = rows().single()
         assertThat(row["type"]).isEqualTo("PROMOTION")
@@ -304,7 +307,7 @@ abstract class NotificationRecordingIntegrationTests {
         users.save(User(nickname = "서비스 동의", servicePushEnabled = true))
         member(status = UserStatus.SUSPENDED)
         member(status = UserStatus.DELETED)
-        val notice = publishNotice(com.knk.manyak.notice.entity.NoticeTag.UPDATE)
+        val notice = publishNotice(com.knk.manyak.notice.dto.NoticeTag.UPDATE)
         promotion.sendDue(Instant.now())
         assertThat(rows()).hasSize(3)
         assertThat(rows().map { it["type"] }).containsOnly("NOTICE")
@@ -315,7 +318,7 @@ abstract class NotificationRecordingIntegrationTests {
     }
 
     @Test fun `공지 캠페인 취소 뒤 해제와 재게시도 캠페인과 내역을 새로 만들지 않는다`() {
-        val notice = publishNotice(com.knk.manyak.notice.entity.NoticeTag.SERVICE)
+        val notice = publishNotice(com.knk.manyak.notice.dto.NoticeTag.SERVICE)
         campaignService.cancel(user.id, campaigns.findAll().single().publicId, "취소")
         assertThat(notices.findByPublicId(notice.noticeId)!!.status.name).isEqualTo("PUBLISHED")
         assertThat(campaigns.findAll().single().status).isEqualTo(PushCampaignStatus.CANCELED)
@@ -327,11 +330,11 @@ abstract class NotificationRecordingIntegrationTests {
     }
 
     @Test fun `내역 기록 후 공지 수정과 재게시는 최초 제목 태그와 회원별 한 행을 보존한다`() {
-        val notice = publishNotice(com.knk.manyak.notice.entity.NoticeTag.UPDATE)
+        val notice = publishNotice(com.knk.manyak.notice.dto.NoticeTag.UPDATE)
         promotion.sendDue(Instant.now())
         val original = rows().single()
         noticeService.update(user.id, notice.noticeId, com.knk.manyak.notice.dto.UpdateNoticeRequest(
-            title = "수정한 제목", tag = com.knk.manyak.notice.entity.NoticeTag.EVENT, reason = "수정"))
+            title = "수정한 제목", tag = com.knk.manyak.notice.dto.NoticeTag.EVENT, reason = "수정"))
         noticeService.unpublish(user.id, notice.noticeId, "해제")
         noticeService.publish(user.id, notice.noticeId, com.knk.manyak.notice.dto.PublishNoticeRequest("재게시"))
         promotion.sendDue(Instant.now())
@@ -339,7 +342,7 @@ abstract class NotificationRecordingIntegrationTests {
         assertThat(rows()).containsExactly(original)
     }
 
-    private fun publishNotice(tag: com.knk.manyak.notice.entity.NoticeTag): com.knk.manyak.notice.dto.AdminNoticeResponse {
+    private fun publishNotice(tag: com.knk.manyak.notice.dto.NoticeTag): com.knk.manyak.notice.dto.AdminNoticeResponse {
         jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", user.id)
         val notice = noticeService.create(user.id, com.knk.manyak.notice.dto.CreateNoticeRequest(title = "원문 제목", body = "본문", tag = tag, reason = "작성"))
         val published = noticeService.publish(user.id, notice.noticeId, com.knk.manyak.notice.dto.PublishNoticeRequest("게시"))
@@ -362,8 +365,7 @@ abstract class NotificationRecordingIntegrationTests {
     private fun rows(): List<Map<String, Any?>> = jdbc.queryForList("SELECT * FROM user_notifications ORDER BY id")
 }
 
-@SpringBootTest(properties = ["manyak.push.mode=local", "manyak.ai.story.stub=true"])
 class LocalNotificationRecordingIntegrationTests : NotificationRecordingIntegrationTests()
 
-@SpringBootTest(properties = ["manyak.push.mode=remote", "manyak.ai.story.stub=true"])
+@TestPropertySource(properties = [PushRemoteIntegrationTest.REMOTE])
 class RemoteNotificationRecordingIntegrationTests : NotificationRecordingIntegrationTests()

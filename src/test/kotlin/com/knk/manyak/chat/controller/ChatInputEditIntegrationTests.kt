@@ -1,7 +1,7 @@
 package com.knk.manyak.chat.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.client.*
@@ -9,26 +9,22 @@ import com.knk.manyak.chat.dto.*
 import com.knk.manyak.chat.entity.*
 import com.knk.manyak.chat.repository.*
 import com.knk.manyak.chat.service.*
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.*
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.EndingReachRecorder
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.*
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
-import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.jdbc.core.JdbcTemplate
 import java.time.Duration
@@ -36,14 +32,16 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@Import(ChatInputEditTestConfig::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = [
-    "manyak.chat.compact.enabled=true",
-    "spring.datasource.url=jdbc:h2:mem:chat-input-edit;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-])
-class ChatInputEditIntegrationTests {
+class ChatInputEditIntegrationTests : ScriptedAiIntegrationTest() {
+    // 압축(compact)이 켜진 경로를 검증한다. 설정 빈은 공용 스파이라 테스트마다 켜고, 끝나면 자동 reset된다.
+    @Autowired private lateinit var compactSettings: com.knk.manyak.chat.config.ChatCompactSettings
+
+    @BeforeEach fun installScriptedAi() {
+        org.mockito.Mockito.doReturn(true).`when`(compactSettings).enabled
+        ScriptedAi.chat = scriptedChatInputEditTestConfigEditAi
+        ScriptedAi.compact = scriptedChatInputEditTestConfigEditCompact
+    }
+
     class Ai : ChatTurnAiClient {
         val requests = CopyOnWriteArrayList<ChatTurnAiRequest>()
         val links = CopyOnWriteArrayList<AiTraceLink>()
@@ -74,11 +72,12 @@ class ChatInputEditIntegrationTests {
     @Autowired lateinit var reconciliation: CreditReconciliationService
     @Autowired lateinit var cleaner: DatabaseCleaner
     @Autowired lateinit var service: ChatService
+    @Autowired lateinit var chatQueryService: ChatQueryService
     @Autowired lateinit var persister: ChatTurnPersister
     @Autowired lateinit var generation: ChatGenerationStore
     @Autowired lateinit var compactService: ChatCompactService
-    @Autowired lateinit var ai: Ai
-    @Autowired lateinit var compact: Compact
+    private val ai = scriptedChatInputEditTestConfigEditAi
+    private val compact = scriptedChatInputEditTestConfigEditCompact
     @Autowired lateinit var tm: org.springframework.transaction.PlatformTransactionManager
     @Autowired lateinit var reachRecorder: EndingReachRecorder
     @Autowired lateinit var jdbc: JdbcTemplate
@@ -206,7 +205,7 @@ class ChatInputEditIntegrationTests {
     @Test fun `수정 키는 EDIT를 노출하고 이어쓰기 재생성 수정의 중복 실행을 거절한다`() {
         val f = fixture()
         ai.beforeResult = {
-            val state = service.getChatDetail(f.chat.publicId.toString(), null).generatingTurn!!
+            val state = chatQueryService.getChatDetail(f.chat.publicId.toString(), null).generatingTurn!!
             assertThat(state.type).isEqualTo("EDIT"); assertThat(state.targetTurnId).isEqualTo(f.turns[2].id)
             assertThatThrownBy { service.streamChatTurn(f.chat.publicId.toString(), ContinueChatRequest("다른 입력"), deviceId = "different") }.hasMessageContaining("409")
             assertThatThrownBy { service.regenerateChatTurn(f.chat.publicId.toString(), RegenerateChatRequest(f.turns.last().id), deviceId = "different") }.hasMessageContaining("409")
@@ -231,10 +230,10 @@ class ChatInputEditIntegrationTests {
         val f = fixture()
         val share = service.createChatShare(f.chat.publicId.toString(), null)
         edit(f)
-        val detail = service.getChatDetail(f.chat.publicId.toString(), null)
+        val detail = chatQueryService.getChatDetail(f.chat.publicId.toString(), null)
         assertThat(detail.turns.map { it.id }).containsExactly(f.turns[0].id, f.turns[1].id, visible(f).last().id)
-        assertThat(service.getChatShare(share.shareId, null).turns.map { it.aiOutput }).doesNotContain("a3", "a4", "a5")
-        assertThat(service.getChatsByIds(BatchChatRequest(listOf(f.chat.publicId.toString())), null).single().lastStoryPreview).contains("수정 응답")
+        assertThat(chatQueryService.getChatShare(share.shareId, null).turns.map { it.aiOutput }).doesNotContain("a3", "a4", "a5")
+        assertThat(chatQueryService.getChatsByIds(BatchChatRequest(listOf(f.chat.publicId.toString())), null).single().lastStoryPreview).contains("수정 응답")
         val latest = messages.findLatestMessagesByChatIdsAndRole(listOf(f.chat.id), MessageRole.ASSISTANT).single()
         assertThat(latest.content).isEqualTo("수정 응답")
         service.generateChoices(f.chat.publicId.toString(), latest.id)
@@ -304,8 +303,10 @@ class ChatInputEditIntegrationTests {
     }
 }
 
-@TestConfiguration
 class ChatInputEditTestConfig {
-    @Bean @Primary fun editAi() = ChatInputEditIntegrationTests.Ai()
-    @Bean @Primary fun editCompact() = ChatInputEditIntegrationTests.Compact()
+    fun editAi() = ChatInputEditIntegrationTests.Ai()
+    fun editCompact() = ChatInputEditIntegrationTests.Compact()
 }
+
+private val scriptedChatInputEditTestConfigEditAi = ChatInputEditTestConfig().editAi()
+private val scriptedChatInputEditTestConfigEditCompact = ChatInputEditTestConfig().editCompact()

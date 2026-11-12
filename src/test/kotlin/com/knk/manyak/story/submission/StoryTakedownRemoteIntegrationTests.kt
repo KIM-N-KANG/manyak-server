@@ -1,7 +1,7 @@
 package com.knk.manyak.story.submission
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.repository.AdminAuditLogRepository
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.inbox.UserNotification
@@ -10,33 +10,30 @@ import com.knk.manyak.push.outbox.PushMessage
 import com.knk.manyak.push.outbox.PushOutboxStore
 import com.knk.manyak.story.dto.UpdateStoryRequest
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryVisibility
-import com.knk.manyak.story.entity.StoryTakedownReason
+import com.knk.manyak.story.dto.StoryVisibility
+import com.knk.manyak.story.dto.StoryTakedownReason
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.junit.jupiter.params.provider.CsvSource
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import org.springframework.test.context.event.RecordApplicationEvents
 import org.springframework.test.context.event.ApplicationEvents
 import org.mockito.Mockito.*
 import org.slf4j.MDC
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoBean
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 
 @RecordApplicationEvents
-@SpringBootTest(properties = ["manyak.push.mode=remote"])
-class StoryTakedownRemoteIntegrationTests {
+class StoryTakedownRemoteIntegrationTests : PushRemoteIntegrationTest() {
     @Autowired lateinit var events: ApplicationEvents
     @Autowired lateinit var cleaner: DatabaseCleaner
     @Autowired lateinit var users: UserRepository
@@ -46,12 +43,12 @@ class StoryTakedownRemoteIntegrationTests {
     @Autowired lateinit var updates: StorySubmissionService
     @Autowired lateinit var worker: SubmissionTransactions
     @Autowired lateinit var jdbc: JdbcTemplate
-    @Autowired lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
+    @Autowired lateinit var withdrawal: com.knk.manyak.auth.service.UserWithdrawalService
     @Autowired lateinit var transactions: PlatformTransactionManager
-    @MockitoBean lateinit var outbox: PushOutboxStore
-    @MockitoBean lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
-    @MockitoSpyBean lateinit var inbox: UserNotificationStore
-    @MockitoSpyBean lateinit var audits: AdminAuditLogRepository
+    @Autowired lateinit var outbox: PushOutboxStore
+    @Autowired lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
+    @Autowired lateinit var inbox: UserNotificationStore
+    @Autowired lateinit var audits: AdminAuditLogRepository
     private lateinit var admin: User
     private lateinit var story: Story
     private val reason = StoryTakedownRequest(StoryTakedownReason.HATE_SPEECH)
@@ -108,9 +105,9 @@ class StoryTakedownRemoteIntegrationTests {
             "OUTBOX" -> doThrow(exception).`when`(outbox).insert(anyMessage(), anyInstant())
             "INBOX" -> doThrow(exception).`when`(org.springframework.test.util.AopTestUtils.getUltimateTargetObject<UserNotificationStore>(inbox))
                 .insert(any(UserNotification::class.java) ?: UserNotification(userId = 0, messageKey = "", type = com.knk.manyak.push.inbox.NotificationType.STORY_TAKEN_DOWN, title = "", body = ""))
-            "AUDIT" -> doThrow(exception).`when`(audits).save(any(com.knk.manyak.admin.entity.AdminAuditLog::class.java)
-                ?: com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = admin.id, category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-                    action = AdminAuditAction.STORY_TAKEN_DOWN, targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.STORY,
+            "AUDIT" -> doThrow(exception).`when`(audits).save(any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java)
+                ?: com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = admin.id, category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+                    action = AdminAuditAction.STORY_TAKEN_DOWN, targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.STORY,
                     targetId = "", requestId = "test"))
         }
         org.junit.jupiter.api.Assertions.assertThrows(RuntimeException::class.java) { take() }
@@ -119,6 +116,8 @@ class StoryTakedownRemoteIntegrationTests {
         assertThat(submissions.findById(row.id).orElseThrow().status).isEqualTo(SubmissionStatus.PENDING)
         assertThat(count("user_notifications")).isZero()
         assertThat(count("admin_audit_logs")).isZero()
+        // 내역이 아웃박스보다 먼저 기록된다(NOTIFICATION 4-1-21). 내역이 실패하면 아웃박스는 시도하지 않는다.
+        if (failure == "INBOX") verifyNoInteractions(outbox)
     }
     @Test fun `탈퇴가 먼저 커밋되면 공개 중단은 알림을 되살리지 않는다`() {
         withdrawal.withdraw(story.userId!!)
@@ -150,7 +149,7 @@ class StoryTakedownRemoteIntegrationTests {
             completion.get(10, java.util.concurrent.TimeUnit.SECONDS)
             deletion.get(10, java.util.concurrent.TimeUnit.SECONDS)
             assertThat(count("user_notifications")).isZero()
-            assertThat(users.findById(story.userId!!).orElseThrow().status).isEqualTo(com.knk.manyak.auth.entity.UserStatus.DELETED)
+            assertThat(users.findById(story.userId!!).orElseThrow().status).isEqualTo(com.knk.manyak.auth.dto.UserStatus.DELETED)
         } finally { release.countDown(); executor.shutdownNow() }
     }
     @Test fun `로그는 커밋 뒤 안전한 필드만 남기고 롤백에서는 남기지 않는다`() {

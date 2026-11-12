@@ -6,6 +6,7 @@ import com.knk.manyak.story.service.StoryListSort.Companion.POPULAR_LIKE_WEIGHT
 object StoryListExpressions {
     // 삭제된 채팅과 입력 수정으로 숨긴 턴, 재생성 횟수를 모두 포함하고 포크로 복사한 턴은 제외한다.
     const val TURN_COUNT = "(SELECT COALESCE(SUM(c.currentTurn + c.hiddenTurnCount + c.regeneratedCount - c.forkedFromTurn), 0) FROM StoryChat c WHERE c.storyId = s.id)"
-    const val LIKE_COUNT = "(SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id)"
+    // COUNT(*)라야 PostgreSQL이 좋아요 행의 id를 읽으러 힙에 가지 않고 idx_story_likes_story만으로 센다.
+    const val LIKE_COUNT = "(SELECT COUNT(*) FROM StoryLike l WHERE l.storyId = s.id)"
     const val POPULAR_SCORE = "($LIKE_COUNT * $POPULAR_LIKE_WEIGHT + $TURN_COUNT)"
 }

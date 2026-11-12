@@ -1,21 +1,13 @@
 package com.knk.manyak.push.controller
 
+import com.knk.manyak.support.AlternateConfigIntegrationTest
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.UUID
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.internal.shared-secret="],
-)
-class InternalPushEligibilityDisabledIntegrationTests {
+class InternalPushEligibilityDisabledIntegrationTests : AlternateConfigIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
 
     @org.junit.jupiter.api.Test

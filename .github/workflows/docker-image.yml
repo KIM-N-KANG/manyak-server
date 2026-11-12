@@ -78,6 +78,7 @@ jobs:
           echo "::notice::동일 트리의 dev 성공 실행 없음: 테스트를 실행합니다 (tree=$HEAD_TREE)"
 
       - name: Test and build JAR
+        id: test-build
         env:
           SKIP_TESTS: ${{ steps.dev-tests.outputs.skip }}
         run: |
@@ -86,6 +87,18 @@ jobs:
           else
             ./gradlew test bootJar --no-daemon
           fi
+
+      # 테스트가 실패하면 원인을 볼 수 있게 결과를 남긴다(KNK-2070). 간헐 실패는 재실행하면 결과가 덮여 사라진다.
+      - name: Upload test results on failure
+        if: failure() && steps.test-build.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-attempt-${{ github.run_attempt }}
+          path: |
+            build/test-results/
+            build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

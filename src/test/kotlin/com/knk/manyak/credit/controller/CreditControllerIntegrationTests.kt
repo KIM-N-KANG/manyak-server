@@ -1,18 +1,16 @@
 package com.knk.manyak.credit.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.UUID
 
@@ -21,11 +19,7 @@ import java.util.UUID
  * - 인증 필수: 토큰 없음·사용자 없음 → 401.
  * - 지갑 없으면 balance 0, 적립 후에는 그 잔액을 반환한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class CreditControllerIntegrationTests {
-
+class CreditControllerIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository

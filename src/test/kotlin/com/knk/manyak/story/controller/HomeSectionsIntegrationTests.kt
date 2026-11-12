@@ -1,15 +1,19 @@
 package com.knk.manyak.story.controller
 
-import com.knk.manyak.admin.entity.AdminAuditLog
-import com.knk.manyak.admin.repository.AdminAuditLogRepository
+import com.knk.manyak.adminkit.audit.AdminAuditLog
+import com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.story.dto.StoryCreationTagSource
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.entity.*
 import com.knk.manyak.story.repository.*
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.support.seedProvidedGenres
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -17,24 +21,16 @@ import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.any
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.UUID
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.official-user-public-id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"])
-class HomeSectionsIntegrationTests {
+class HomeSectionsIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var stories: StoryRepository
@@ -45,7 +41,7 @@ class HomeSectionsIntegrationTests {
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var mapper: ObjectMapper
-    @MockitoSpyBean private lateinit var audits: AdminAuditLogRepository
+    @Autowired private lateinit var audits: AdminAuditLogRepository
     private lateinit var actor: User
     private lateinit var official: User
     private lateinit var token: String
@@ -85,7 +81,7 @@ class HomeSectionsIntegrationTests {
     @BeforeEach fun setup() {
         reset(audits); cleaner.cleanAll()
         actor = users.save(User(nickname = "관리자"))
-        official = users.save(User(nickname = "공식", publicId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")))
+        official = users.save(User(nickname = "공식", publicId = UUID.fromString(IntegrationTest.OFFICIAL_USER_PUBLIC_ID)))
         jdbc.update("INSERT INTO admin_accounts(user_id, granted_at) VALUES (?, CURRENT_TIMESTAMP)", actor.id)
         token = jwt.issueAdminToken(actor.publicId)
         seedProvidedGenres(tags, "판타지", "로맨스", "미스터리")
@@ -121,7 +117,7 @@ class HomeSectionsIntegrationTests {
         assertThat(b["sections"][0]["items"].first { it["id"].asText() == guest.publicId.toString() }["author"].isNull).isTrue()
         assertThat(home("Bearer invalid")).isEqualTo(b)
         assertThat(home("Bearer ${jwt.issueAccessToken(actor.publicId)}")).isEqualTo(b)
-        actor.status = com.knk.manyak.auth.entity.UserStatus.DELETED; users.saveAndFlush(actor)
+        actor.status = com.knk.manyak.auth.dto.UserStatus.DELETED; users.saveAndFlush(actor)
         assertThat(home("Bearer ${jwt.issueAccessToken(actor.publicId)}")).isEqualTo(b)
     }
 
@@ -311,8 +307,8 @@ class HomeSectionsIntegrationTests {
         val a = stories.save(Story(title = "첫째")); val b = stories.save(Story(title = "둘째"))
         val section = manual(listOf(a)); val id = section["id"].asText()
         doThrow(org.springframework.dao.DataIntegrityViolationException("audit failure")).`when`(audits).save(any(AdminAuditLog::class.java)
-            ?: AdminAuditLog(adminUserId = actor.id, category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-                action = com.knk.manyak.admin.entity.AdminAuditAction.ORIGINAL_CREATED, targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.STORY, targetId = id, requestId = "matcher"))
+            ?: AdminAuditLog(adminUserId = actor.id, category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+                action = com.knk.manyak.adminkit.audit.AdminAuditAction.ORIGINAL_CREATED, targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.STORY, targetId = id, requestId = "matcher"))
         request(HttpMethod.PATCH, "$path/$id", mapOf("name" to "실패", "storyIds" to listOf(b.publicId.toString()), "reason" to "실패")).expectStatus().is5xxServerError
         request(HttpMethod.DELETE, "$path/$id", mapOf("reason" to "실패")).expectStatus().is5xxServerError
         request(HttpMethod.POST, path, mapOf("name" to "실패", "source" to "FILTER", "sort" to "latest", "reason" to "실패")).expectStatus().is5xxServerError

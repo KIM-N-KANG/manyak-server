@@ -1,6 +1,7 @@
 package com.knk.manyak.admin.repository
 
 import com.knk.manyak.admin.dto.*
+import com.knk.manyak.adminkit.query.AdminQuery
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository
 import java.time.Instant

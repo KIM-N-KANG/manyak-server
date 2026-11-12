@@ -2,12 +2,18 @@ package com.knk.manyak.admin.service
 
 import com.knk.manyak.admin.config.AdminDashboardProperties
 import com.knk.manyak.admin.dto.*
-import com.knk.manyak.admin.entity.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.admin.repository.AdminDashboardRepository
 import com.knk.manyak.admin.repository.AdminReadRepository
-import com.knk.manyak.auth.consent.SocialAuthPrivacyFilter
-import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.credit.entity.CreditOrderStatus
+import com.knk.manyak.adminkit.query.AdminDateRange
+import com.knk.manyak.adminkit.query.AdminListRequest
+import com.knk.manyak.adminkit.query.AdminPageResponse
+import com.knk.manyak.adminkit.query.AdminPagination
+import com.knk.manyak.adminkit.query.badAdminQuery
+import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
+import com.knk.manyak.auth.service.AccountQueryService
+import com.knk.manyak.credit.dto.CreditOrderStatus
 import com.knk.manyak.credit.service.CreditWalletService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -22,10 +28,9 @@ class AdminReadService(
     private val official: com.knk.manyak.story.service.OfficialStoryAccount,
     private val dashboard: AdminDashboardRepository,
     private val properties: AdminDashboardProperties,
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val wallet: CreditWalletService,
     private val audits: AdminAuditService,
-    private val storyRepository: com.knk.manyak.story.repository.StoryRepository,
     private val edit: com.knk.manyak.story.service.StoryEditService,
     private val clock: Clock = Clock.systemUTC(),
 ) {
@@ -109,8 +114,8 @@ class AdminReadService(
     }
     /** 4-2-7. 삭제 여부와 소유자 검사 없이 현재 저장값 수정 폼 조립을 쓴다. 접속 기록 없음. */
     fun storySettings(storyId: UUID): AdminStorySettingsResponse {
-        val story = storyRepository.findByPublicId(storyId) ?: notFound()
-        return AdminStorySettingsResponse(edit.getCurrentForm(story), story.deletedAt)
+        val current = edit.getCurrentForm(storyId) ?: notFound()
+        return AdminStorySettingsResponse(current.form, current.deletedAt)
     }
     fun chats(request: AdminChatsRequest): AdminPageResponse<AdminChatResponse> {
         if (request.startedAs != null && request.startedAs !in setOf("GUEST", "MEMBER")) badAdminQuery("채팅 시작 구분이 올바르지 않습니다.")
@@ -128,6 +133,6 @@ class AdminReadService(
             "targetType" to "l.target_type", "admin" to "u.nickname"), "createdAt"))
     }
     private fun validateDeleted(value: String?) { if (value != null && value !in setOf("include", "only")) badAdminQuery("삭제 필터가 올바르지 않습니다.") }
-    private fun requireMember(id: UUID) = users.findByPublicId(id) ?: notFound()
+    private fun requireMember(id: UUID) = accounts.adminMemberOf(id) ?: notFound()
     private fun notFound(): Nothing = throw ResponseStatusException(HttpStatus.NOT_FOUND, "대상을 찾을 수 없습니다.")
 }

@@ -1,17 +1,15 @@
 package com.knk.manyak.invite.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.UUID
 
@@ -20,11 +18,7 @@ import java.util.UUID
  * - 인증 필수: 토큰 없음·사용자 없음 → 401.
  * - 최초 조회는 코드를 발급하고, 재조회는 같은 코드를 돌려준다(안정적).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class InviteIntegrationTests {
-
+class InviteIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository

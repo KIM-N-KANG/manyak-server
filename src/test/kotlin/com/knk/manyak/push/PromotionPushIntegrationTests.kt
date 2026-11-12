@@ -2,20 +2,23 @@ package com.knk.manyak.push
 
 import com.google.firebase.messaging.AndroidConfig.Priority.NORMAL
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.entity.DevicePushToken
 import com.knk.manyak.push.entity.PushCampaign
-import com.knk.manyak.push.entity.PushCampaignStatus
-import com.knk.manyak.push.entity.PushPlatform
+import com.knk.manyak.push.dto.PushCampaignStatus
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import com.knk.manyak.push.repository.PushCampaignRepository
+import com.knk.manyak.push.repository.PushTargetRepository
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.push.service.PromotionPushService
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -30,10 +33,6 @@ import org.mockito.Mockito.reset
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
@@ -51,17 +50,18 @@ import java.util.concurrent.atomic.AtomicInteger
  * 대상은 `ACTIVE` ∩ 광고 동의 ∩ 등록 토큰 보유이고, 야간(21~08시 KST)에 예약된 캠페인은 거부·연기가 아니라
  * **야간 동의자에게만** 나간다. 선점은 Redis가 아니라 캠페인 행의 조건부 UPDATE가 한다.
  */
-@ActiveProfiles("test")
-@SpringBootTest
-class PromotionPushIntegrationTests {
+class PromotionPushIntegrationTests : MockedBoundaryIntegrationTest() {
 
-    @MockitoBean private lateinit var fcmPushSender: FcmPushSender
+    @Autowired private lateinit var fcmPushSender: FcmPushSender
 
-    @MockitoSpyBean private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var targets: PushTargetRepository
 
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var storyReader: com.knk.manyak.story.service.StoryPlayReader
+    @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var devicePushTokenRepository: DevicePushTokenRepository
     @Autowired private lateinit var pushCampaignRepository: PushCampaignRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
@@ -96,7 +96,7 @@ class PromotionPushIntegrationTests {
      * 주입된 시스템 시계를 그대로 두면 테스트를 21시 이후에 돌릴 때 결과가 달라진다.
      */
     private fun service(clock: Clock = Clock.fixed(NOW, ZoneOffset.UTC)) =
-        PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, stories, clock, notifications = notifications, notices = notices)
+        PromotionPushService(pushCampaignRepository, AccountQueryService(userRepository), fcmPushSender, storyReader, clock, notifications = notifications, notices = noticeService)
 
     private fun eligibleMember(nightAgreed: Boolean = false): User =
         saveMember(nightAgreed = nightAgreed).also { saveToken(it) }
@@ -298,7 +298,7 @@ class PromotionPushIntegrationTests {
     @Test
     fun `대상 조회가 실패하면 캠페인을 실패로 남긴다`() {
         val campaign = saveCampaign()
-        doThrow(IllegalStateException("db down")).`when`(userRepository).findMarketingPushTargetIds()
+        doThrow(IllegalStateException("db down")).`when`(targets).findMarketingPushTargetIds()
 
         val result = service().sendDue(NOW).single()
 
@@ -316,7 +316,7 @@ class PromotionPushIntegrationTests {
         val afterNight = eligibleMember()
         saveCampaign(scheduledAt = JUST_BEFORE_NIGHT)
         val crossing = SteppingClock(listOf(JUST_BEFORE_NIGHT, JUST_BEFORE_NIGHT, JUST_AFTER_NIGHT))
-        val service = PromotionPushService(pushCampaignRepository, userRepository, fcmPushSender, stories, crossing, notifications = notifications, notices = notices)
+        val service = PromotionPushService(pushCampaignRepository, AccountQueryService(userRepository), fcmPushSender, storyReader, crossing, notifications = notifications, notices = noticeService)
 
         val result = service.sendDue(JUST_BEFORE_NIGHT).single()
 

@@ -1,7 +1,7 @@
 package com.knk.manyak.story.submission
 
-import com.knk.manyak.admin.dto.AdminOperationReason
-import com.knk.manyak.admin.security.AdminRequester
+import com.knk.manyak.adminkit.dto.AdminOperationReason
+import com.knk.manyak.adminkit.security.AdminRequester
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
@@ -20,7 +20,7 @@ import java.util.UUID
 class AdminModerationController(private val service: AdminModerationService, private val takedowns: StoryTakedownService) {
     @PostMapping("/stories/{storyId}/takedown")
     fun takedown(@PathVariable storyId: UUID, @RequestBody body: StoryTakedownRequest, request: HttpServletRequest) =
-        com.knk.manyak.auth.consent.SocialAuthPrivacyFilter.safely {
+        com.knk.manyak.global.observability.SocialAuthPrivacyFilter.safely {
             takedowns.takeDown(AdminRequester.userId(request), storyId, body)
         }
 

@@ -5,7 +5,7 @@ import com.knk.manyak.chat.repository.StoryChatSummaryRepository
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryMessage
 import org.junit.jupiter.params.ParameterizedTest

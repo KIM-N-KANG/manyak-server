@@ -1,6 +1,5 @@
 package com.knk.manyak.global.observability.aicall
 
-import com.knk.manyak.story.client.StoryContentRejectedException
 import com.knk.manyak.global.observability.MdcKeys
 import com.knk.manyak.global.observability.StructuredLogger
 import io.micrometer.core.instrument.MeterRegistry
@@ -66,7 +65,7 @@ class AiCallRecorder(
             logEvent(EVENT_COMPLETED, context, log.id, OUTCOME_SUCCESS, durationNanos)
             return RecordedAiCall(result, log.id)
         } catch (throwable: Throwable) {
-            if (throwable is StoryContentRejectedException) {
+            if (throwable is AiCallContractRejection) {
                 val durationNanos = System.nanoTime() - startNanos
                 log.markSucceeded(latencyMs = durationNanos / 1_000_000)
                 repository.save(log)

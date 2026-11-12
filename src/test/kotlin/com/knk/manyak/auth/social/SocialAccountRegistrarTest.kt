@@ -1,9 +1,9 @@
 package com.knk.manyak.auth.social
 
 import com.knk.manyak.auth.entity.SocialAccount
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import org.assertj.core.api.Assertions.assertThat
@@ -42,7 +42,7 @@ class SocialAccountRegistrarTest {
     private val profileImagePresetService: ProfileImagePresetService = mock(ProfileImagePresetService::class.java)
     private val registrar = SocialAccountRegistrar(
         userRepository, socialAccountRepository, uniqueNicknameIssuer, profileImagePresetService,
-        mock(com.knk.manyak.user.consent.UserConsentService::class.java),
+        mock(com.knk.manyak.auth.consent.UserConsentService::class.java),
     )
 
     @Test

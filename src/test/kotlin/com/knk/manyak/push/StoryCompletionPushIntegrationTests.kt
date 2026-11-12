@@ -2,22 +2,23 @@ package com.knk.manyak.push
 
 import com.google.firebase.messaging.AndroidConfig.Priority.HIGH
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.service.FcmPushSender
-import com.knk.manyak.story.entity.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.entity.StoryCreationTag
-import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.dto.StoryCreationTagSource
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryCreationTagRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -33,11 +34,7 @@ import org.mockito.Mockito.times
 import org.mockito.Mockito.timeout
 import org.mockito.Mockito.verify
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.UUID
 
@@ -52,17 +49,9 @@ import java.util.UUID
  * AI는 메인 코드의 스텁(`manyak.ai.story.stub`)을 켜 쓴다 — 가짜 빈을 중첩 @TestConfiguration으로 두면
  * 이 클래스만의 Spring 컨텍스트가 하나 더 생긴다(SpringContextBudgetGuardTests).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    // 실제 AI 대신 메인 코드의 스텁을 켠다(StubStoryAiClient). 중첩 @TestConfiguration으로 가짜 빈을 두면
-    // 이 클래스만의 Spring 컨텍스트가 하나 더 생긴다(SpringContextBudgetGuardTests).
-    properties = ["manyak.ai.story.stub=true"],
-)
-class StoryCompletionPushIntegrationTests {
+class StoryCompletionPushIntegrationTests : MockedBoundaryIntegrationTest() {
 
-    @MockitoBean private lateinit var fcmPushSender: FcmPushSender
+    @Autowired private lateinit var fcmPushSender: FcmPushSender
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository

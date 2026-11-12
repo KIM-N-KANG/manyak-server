@@ -4,7 +4,7 @@ import com.knk.manyak.story.dto.GenreCatalogItem
 import com.knk.manyak.story.dto.GenreCatalogResponse
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
 import com.knk.manyak.story.entity.StoryCreationTag
-import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.dto.StoryCreationTagSource
 import com.knk.manyak.story.repository.StoryCreationTagAliasRepository
 import com.knk.manyak.story.repository.StoryCreationTagRepository
 import org.springframework.http.HttpStatus

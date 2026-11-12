@@ -10,16 +10,14 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.client.ChatCharacterImageEvent
@@ -29,12 +27,12 @@ import com.knk.manyak.chat.client.ChatCompactAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.global.observability.AiTraceLink
@@ -42,6 +40,7 @@ import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.global.observability.aicall.AiCallFeature
 import com.knk.manyak.global.observability.aicall.AiCallLogRepository
 import com.knk.manyak.global.observability.aicall.AiCallStatus
+import com.knk.manyak.support.ChatCompactIntegrationTest
 import com.knk.manyak.support.awaitGenerationReleased
 import java.time.Duration
 import java.time.Instant
@@ -58,17 +57,14 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.api.Test
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 
-@ActiveProfiles("test")
-@Import(ChatCompactTestConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.chat.compact.enabled=true", "spring.datasource.url=jdbc:h2:mem:compact;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;LOCK_TIMEOUT=10000"])
-class ChatCompactIntegrationTests {
+class ChatCompactIntegrationTests : ChatCompactIntegrationTest() {
+    // 압축이 켜진 경로를 검증한다. 설정 빈은 공용 스파이라 테스트마다 켜고, 끝나면 자동 reset된다.
+    @Autowired lateinit var compactSettings: com.knk.manyak.chat.config.ChatCompactSettings
+
     class Ai : ChatCompactAiClient {
         val requests = CopyOnWriteArrayList<ChatCompactAiRequest>()
         val links = CopyOnWriteArrayList<AiTraceLink>()
@@ -112,6 +108,7 @@ class ChatCompactIntegrationTests {
     @Autowired lateinit var transactions: CreditTransactionRepository
     @Autowired lateinit var generationStore: ChatGenerationStore
     @Autowired lateinit var chatService: ChatService
+    @Autowired lateinit var chatQueryService: ChatQueryService
     @Autowired lateinit var service: ChatCompactService
     @Autowired lateinit var summaries: StoryChatSummaryRepository
     @Autowired lateinit var chats: StoryChatRepository
@@ -162,6 +159,7 @@ class ChatCompactIntegrationTests {
     }
 
     @BeforeEach fun reset() {
+        org.mockito.Mockito.doReturn(true).`when`(compactSettings).enabled
         cleaner.cleanAll()
         ai.requests.clear(); ai.links.clear(); ai.respond = { "새 요약" }
         queue.tasks.clear(); queue.reject = false; log.entries.clear()
@@ -215,19 +213,19 @@ class ChatCompactIntegrationTests {
         val chat = fixture(10)
         val other = fixture(5)
         val ids = listOf(chat.publicId.toString(), other.publicId.toString())
-        val beforeOrder = chatService.getChatsByIds(BatchChatRequest(ids), null).map { it.id }
+        val beforeOrder = chatQueryService.getChatsByIds(BatchChatRequest(ids), null).map { it.id }
         val share = chatService.createChatShare(chat.publicId.toString(), null)
         service.compact(event(chat, 10))
         val responses = listOf(
-            chatService.getChatDetail(chat.publicId.toString(), null),
-            chatService.getChatsByIds(BatchChatRequest(ids), null),
-            chatService.getChatShare(share.shareId, null),
+            chatQueryService.getChatDetail(chat.publicId.toString(), null),
+            chatQueryService.getChatsByIds(BatchChatRequest(ids), null),
+            chatQueryService.getChatShare(share.shareId, null),
         )
         responses.forEach {
             val json = JsonMapper().writeValueAsString(it)
             assertThat(json).doesNotContain("새 요약", "summaryThroughTurn", "summary_through_turn", "\"summary\"")
         }
-        assertThat(chatService.getChatsByIds(BatchChatRequest(ids), null).map { it.id }).isEqualTo(beforeOrder)
+        assertThat(chatQueryService.getChatsByIds(BatchChatRequest(ids), null).map { it.id }).isEqualTo(beforeOrder)
     }
 
     @Test fun `요약 저장은 메시지와 갱신 시각을 유지하고 호출 기록과 로그를 남긴다`() {
@@ -439,6 +437,29 @@ class ChatCompactIntegrationTests {
         assertThat(reload(chat).currentTurn).isEqualTo(10)
         assertThat(ai.requests).isEmpty()
         assertThat(reason("chat_compact_failed")).isEqualTo("START_FAILED")
+    }
+    @Test fun `요약 무효화 로그의 story_id는 스토리 공개 식별자다`() {
+        val chat = fixture(15, 10)
+        summaries.saveAndFlush(StoryChatSummary(chatId = chat.id, throughTurn = 15, summary = "15 요약"))
+        regenerate(chat)
+        val storyPublicId = stories.findById(chat.storyId).orElseThrow().publicId
+        assertThat(log.entries.single { it.first == "chat_compact_invalidated" }.second["story_id"]).isEqualTo(storyPublicId.toString())
+    }
+    @Test fun `스토리 행이 없으면 요약은 AI를 부르지 않고 START_FAILED를 남긴다`() {
+        val chat = fixture(10)
+        // story_chats.story_id는 테스트 스키마(ddl-auto)에서 FK가 없어 없는 스토리를 가리키게 만들 수 있다.
+        jdbc.update("UPDATE story_chats SET story_id=? WHERE id=?", 999_999_999L, chat.id)
+        try {
+            service.compact(event(chat))
+            assertThat(ai.requests).isEmpty()
+            assertThat(reason("chat_compact_failed")).isEqualTo("START_FAILED")
+            // 실패 로그의 error는 예외 클래스 단순명이다. 예외 타입이 바뀌면 로그 값이 바뀐다.
+            assertThat(log.entries.last { it.first == "chat_compact_failed" }.second["error"]).isEqualTo("NoSuchElementException")
+            assertThat(currentSummary(chat)).isNull()
+        } finally {
+            // 없는 스토리를 가리키는 고아 행을 남기지 않는다.
+            jdbc.update("UPDATE story_chats SET story_id=? WHERE id=?", chat.storyId, chat.id)
+        }
     }
     @Test fun `요약 저장과 설정 변경은 서로의 값을 유지한다`() {
         val chat = fixture()

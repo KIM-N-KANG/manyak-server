@@ -12,16 +12,13 @@ import com.knk.manyak.credit.service.GuestTrialLimitService.Counter
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.util.ReflectionTestUtils
 import org.springframework.transaction.support.TransactionSynchronization
 import org.springframework.transaction.support.TransactionSynchronizationManager
@@ -32,11 +29,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /** 실제 서비스·DB·Redis 테스트 구현을 사용하고 executor와 서블릿 종료 통지만 결정적으로 제어한다. */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@Import(GatedChatTurnAiClientConfig::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatImageFailureIntegrationTests {
+class ChatImageFailureIntegrationTests : ScriptedAiIntegrationTest() {
     @Autowired private lateinit var service: ChatService
     @Autowired private lateinit var images: ChatRealtimeImageService
     @Autowired private lateinit var trials: GuestTrialLimitService
@@ -65,13 +58,13 @@ class ChatImageFailureIntegrationTests {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "유료이미지회원"))
         if (drainTurn) while (trials.reserveMember(user.id, Counter.CHAT_TURN)) { }
         if (drainImage) while (trials.reserveMember(user.id, Counter.CHAT_IMAGE)) { }
-        if (balance > 0) wallet.reward(user.id, balance, com.knk.manyak.credit.entity.CreditReason.SIGNUP_REWARD, "seed")
+        if (balance > 0) wallet.reward(user.id, balance, com.knk.manyak.credit.dto.CreditReason.SIGNUP_REWARD, "seed")
         chat = chats.save(StoryChat(storyId = chat.storyId, userId = user.id))
         return user.id
     }
     private fun paidStart(userId: Long) = service.streamChatTurn(chat.publicId.toString(), ContinueChatRequest(userInput = "유료"), userId = userId)
     private fun spends() = ledger.findAll().filter { it.amount < 0 }
-    private fun refunds() = ledger.findAll().filter { it.reason == com.knk.manyak.credit.entity.CreditReason.REFUND }
+    private fun refunds() = ledger.findAll().filter { it.reason == com.knk.manyak.credit.dto.CreditReason.REFUND }
 
     @Test fun `유료 이미지와 턴을 한꺼번에 차감한 뒤 슬롯을 전달한다`() {
         val user = paidMember()

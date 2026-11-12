@@ -1,10 +1,10 @@
 package com.knk.manyak.push.service
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.DevicePushToken
-import com.knk.manyak.push.entity.PushPlatform
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -26,7 +26,7 @@ class DevicePushTokenServiceTest {
 
     private val devicePushTokenRepository: DevicePushTokenRepository = mock(DevicePushTokenRepository::class.java)
     private val userRepository: UserRepository = mock(UserRepository::class.java)
-    private val service = DevicePushTokenService(devicePushTokenRepository, userRepository)
+    private val service = DevicePushTokenService(devicePushTokenRepository, com.knk.manyak.auth.service.AccountLockService(userRepository, com.knk.manyak.auth.repository.AccountNoKeyUpdateLock { error("이 테스트는 이프 조정 잠금을 쓰지 않는다") }))
 
     private fun lockedUser(id: Long, status: UserStatus): User =
         User(id = id, nickname = "푸시유저", status = status).also {

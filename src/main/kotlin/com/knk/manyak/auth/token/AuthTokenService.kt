@@ -3,11 +3,11 @@ package com.knk.manyak.auth.token
 import com.knk.manyak.auth.config.AuthProperties
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.StructuredLogger
-import com.knk.manyak.global.security.isActiveAccessAllowed
+import com.knk.manyak.auth.security.isActiveAccessAllowed
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service

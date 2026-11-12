@@ -1,6 +1,6 @@
 package com.knk.manyak.chat.controller
 
-import com.knk.manyak.admin.security.AdminRequester
+import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.chat.dto.AdminChatModelPromotionRequest
 import com.knk.manyak.chat.dto.AdminChatModelPromotionDeleteRequest
 import com.knk.manyak.chat.service.AdminChatModelService

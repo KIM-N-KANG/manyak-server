@@ -5,13 +5,11 @@ import com.knk.manyak.credit.repository.CreditPolicyRepository
 import com.knk.manyak.credit.service.CreditPolicyKey
 import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -21,10 +19,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * `credit_policies` 오버라이드로 릴리스 없이 바뀌므로(KNK-1056), 이 엔드포인트가 **yml 기본값이 아니라
  * 그때그때 유효값**을 준다는 점이 계약의 핵심이다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class CreditPolicyControllerIntegrationTests {
+class CreditPolicyControllerIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var models: com.knk.manyak.chat.repository.ChatModelRepository
 
     @Test

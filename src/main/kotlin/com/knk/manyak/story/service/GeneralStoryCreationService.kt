@@ -1,8 +1,8 @@
 package com.knk.manyak.story.service
 
 import org.springframework.context.ApplicationEventPublisher
-import com.knk.manyak.search.event.StoryIndexRequestedEvent
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.story.event.StoryIndexRequestedEvent
+import com.knk.manyak.auth.security.SuspensionGuard
 import com.knk.manyak.image.service.UploadedImageKind
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.GeneralCharacterInput
@@ -137,8 +137,8 @@ class GeneralStoryCreationService(
     fun createOriginalDraft(title: String, userId: Long): Story {
         suspensionGuard.requireActive(userId)
         return storyRepository.save(Story(userId = userId, title = title,
-            status = com.knk.manyak.story.entity.StoryStatus.DRAFT,
-            visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
+            status = com.knk.manyak.story.dto.StoryStatus.DRAFT,
+            visibility = com.knk.manyak.story.dto.StoryVisibility.PRIVATE))
     }
 
     /** 시작 설정 하나와 그 스코프의 추천 입력·엔딩을 저장하고 응답 객체로 만든다(KNK-515 복수화). */

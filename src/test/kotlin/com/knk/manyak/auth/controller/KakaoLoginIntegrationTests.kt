@@ -1,21 +1,18 @@
 package com.knk.manyak.auth.controller
 
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.social.RandomNicknameGenerator
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -29,11 +26,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  *
  * 카카오 호출은 가짜 검증기([FakeSocialLoginConfig])로 대체해 외부 IO 없이 검증한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(FakeSocialLoginConfig::class)
-class KakaoLoginIntegrationTests {
+class KakaoLoginIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

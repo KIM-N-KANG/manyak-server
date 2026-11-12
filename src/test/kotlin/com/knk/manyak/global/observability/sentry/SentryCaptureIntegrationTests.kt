@@ -1,5 +1,6 @@
 package com.knk.manyak.global.observability.sentry
 
+import com.knk.manyak.support.IntegrationTest
 import io.sentry.Sentry
 import io.sentry.SentryEvent
 import io.sentry.SentryOptions
@@ -7,14 +8,12 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -25,31 +24,11 @@ import java.util.concurrent.CopyOnWriteArrayList
  *
  * beforeSend로 이벤트를 가로채 수집하고 실제 전송은 차단한다(DSN은 더미).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["sentry.dsn=http://test@localhost/1"],
-)
-@Import(SentryCaptureIntegrationTests.CaptureConfig::class)
-class SentryCaptureIntegrationTests {
-
-    @TestConfiguration
-    class CaptureConfig {
-        @Bean
-        fun capturedEvents(): CopyOnWriteArrayList<SentryEvent> = CopyOnWriteArrayList()
-
-        @Bean
-        fun captureOptions(
-            capturedEvents: CopyOnWriteArrayList<SentryEvent>,
-        ): Sentry.OptionsConfiguration<SentryOptions> =
-            Sentry.OptionsConfiguration { options ->
-                options.beforeSend = SentryOptions.BeforeSendCallback { event, _ ->
-                    capturedEvents.add(event)
-                    null // 수집만 하고 실제 전송은 막는다
-                }
-            }
-    }
+// Sentry SDK는 전역(static)이라 컨텍스트가 뜰 때마다 다시 초기화된다. 다른 컨텍스트가 이 클래스의 컨텍스트보다 늦게 뜨면
+// DSN 없는 설정으로 덮여 수집이 꺼지므로, 공용 조합에 넣지 않고 이 클래스만의 컨텍스트를 둔다(KNK-2053).
+@TestPropertySource(properties = ["sentry.dsn=http://test@localhost/1"])
+@Import(SentryCaptureConfig::class)
+class SentryCaptureIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -110,4 +89,22 @@ class SentryCaptureIntegrationTests {
 
     // 405는 SecurityConfig가 경로+메서드 단위로 허용해 미허용 메서드가 403(Security)으로 먼저 막히므로
     // 통합 경로로는 재현되지 않는다. 405 핸들러와 Allow 헤더는 GlobalExceptionHandlerSentryTests(단위)에서 검증한다.
+}
+
+/** beforeSend로 Sentry 이벤트를 수집만 하고 실제 전송은 막는다. */
+@TestConfiguration
+class SentryCaptureConfig {
+    @Bean
+    fun capturedEvents(): CopyOnWriteArrayList<SentryEvent> = CopyOnWriteArrayList()
+
+    @Bean
+    fun captureOptions(
+        capturedEvents: CopyOnWriteArrayList<SentryEvent>,
+    ): Sentry.OptionsConfiguration<SentryOptions> =
+        Sentry.OptionsConfiguration { options ->
+            options.beforeSend = SentryOptions.BeforeSendCallback { event, _ ->
+                capturedEvents.add(event)
+                null // 수집만 하고 실제 전송은 막는다
+            }
+        }
 }

@@ -4,17 +4,18 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.push.entity.PushCampaign
-import com.knk.manyak.push.entity.PushCampaignStatus
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.loopbackUrl
+import com.knk.manyak.support.startOnLoopback
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
@@ -23,16 +24,14 @@ import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 
-@AutoConfigureRestTestClient
 @Import(CampaignTestClock::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class PushOpensIntegrationTests {
+class PushOpensIntegrationTests : IntegrationTest() {
     companion object {
-        private val server = MockWebServer().apply { start() }
+        private val server = MockWebServer().startOnLoopback()
         @JvmStatic @DynamicPropertySource fun properties(registry: DynamicPropertyRegistry) {
             registry.add("manyak.analytics.amplitude.api-key") { "mock" }
             registry.add("manyak.analytics.amplitude.secret-key") { "mock" }
-            registry.add("manyak.analytics.amplitude.dashboard-base-url") { server.url("/").toString() }
+            registry.add("manyak.analytics.amplitude.dashboard-base-url") { server.loopbackUrl("/") }
             registry.add("manyak.admin.push-opens.measured-from") { "2026-10-21" }
         }
         @JvmStatic @AfterAll fun stop() { server.shutdown() }
@@ -139,7 +138,7 @@ class PushOpensIntegrationTests {
         val chat = chats.saveAndFlush(com.knk.manyak.chat.entity.StoryChat(storyId = story.id, userId = user?.id,
             deletedAt = if (deleted) Instant.parse(at) else null))
         messages.saveAndFlush(com.knk.manyak.chat.entity.StoryMessage(chatId = chat.id,
-            role = com.knk.manyak.chat.entity.MessageRole.valueOf(role), content = "집계에서 읽지 않는 원문", messageOrder = 1, createdAt = Instant.parse(at)))
+            role = com.knk.manyak.chat.dto.MessageRole.valueOf(role), content = "집계에서 읽지 않는 원문", messageOrder = 1, createdAt = Instant.parse(at)))
     }
     private fun conversionGet(path: String, token: String) = mapper.readTree(client.get().uri("/api/v1/admin/campaigns/push-opens$path")
         .header("Authorization", "Bearer $token").exchange().expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)

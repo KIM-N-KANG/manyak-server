@@ -4,8 +4,8 @@ import com.knk.manyak.story.service.StoryListSort
 import com.knk.manyak.story.repository.StoryListExpressions.LIKE_COUNT
 import com.knk.manyak.story.repository.StoryListExpressions.POPULAR_SCORE
 import com.knk.manyak.story.repository.StoryListExpressions.TURN_COUNT
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Repository
 

@@ -3,27 +3,27 @@ package com.knk.manyak.push.inbox
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.StructuredLogger
+import com.knk.manyak.push.dto.PushCampaignStatus
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.outbox.*
 import com.knk.manyak.push.repository.*
 import com.knk.manyak.push.scheduler.AttendanceReminderScheduler
 import com.knk.manyak.push.service.*
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.time.Instant
 
 /** 실제 INSERT 뒤 실패시켜 앞선 내역과 아웃박스까지 회차 단위로 롤백되는지 검증한다. */
-@SpringBootTest(properties = ["manyak.push.mode=remote"])
-class ScheduledNotificationAtomicityTests {
+class ScheduledNotificationAtomicityTests : PushRemoteIntegrationTest() {
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var tokens: DevicePushTokenRepository
@@ -32,9 +32,9 @@ class ScheduledNotificationAtomicityTests {
     @Autowired private lateinit var attendance: AttendanceReminderService
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var redis: StringRedisTemplate
-    @MockitoBean private lateinit var outbox: PushOutboxStore
-    @MockitoBean private lateinit var relay: PushOutboxRelay
-    @MockitoBean private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var outbox: PushOutboxStore
+    @Autowired private lateinit var relay: PushOutboxRelay
+    @Autowired private lateinit var sender: FcmPushSender
 
     @BeforeEach fun setup() {
         // Flyway off인 H2에는 JDBC 전용 아웃박스 테이블이 없다. 트랜잭션 참여를 확인할 저장 대역을 둔다.

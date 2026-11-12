@@ -1,13 +1,13 @@
 package com.knk.manyak.credit.service
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.service.AdminAuditService
-import com.knk.manyak.auth.entity.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
+import com.knk.manyak.auth.dto.UserStatus
+import com.knk.manyak.auth.service.AccountLockService
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.credit.dto.*
 import com.knk.manyak.credit.entity.CreditAdminAdjustment
 import com.knk.manyak.credit.repository.CreditAdminAdjustmentRepository
-import com.knk.manyak.credit.repository.CreditAdminLocks
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
 import org.springframework.dao.DataIntegrityViolationException
@@ -21,11 +21,11 @@ import tools.jackson.databind.ObjectMapper
 @Service
 class AdminCreditAdjustmentService(
     private val adjustments: CreditAdminAdjustmentRepository,
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val wallet: CreditWalletService,
     private val audit: AdminAuditService,
     private val mapper: ObjectMapper,
-    private val locks: CreditAdminLocks,
+    private val accountLocks: AccountLockService,
     transactionManager: PlatformTransactionManager,
 ) {
     private val transaction = TransactionTemplate(transactionManager)
@@ -36,7 +36,7 @@ class AdminCreditAdjustmentService(
         try {
             return transaction.execute {
                 adjustments.findByIdempotencyKey(request.idempotencyKey)?.let { return@execute replay(it, request) }
-                val user = locks.target(request.memberId)
+                val user = accountLocks.lockForNoKeyUpdate(request.memberId)
                     ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다.")
                 // 잠금 대기 중 같은 요청이 끝났다면 상태 판정 전에 저장된 결과를 돌려준다.
                 adjustments.findByIdempotencyKey(request.idempotencyKey)?.let { return@execute replay(it, request) }
@@ -75,7 +75,7 @@ class AdminCreditAdjustmentService(
     }
 
     private fun replay(row: CreditAdminAdjustment, request: AdminCreditAdjustmentRequest): AdminCreditAdjustmentResponse {
-        val memberId = users.findById(row.userId).orElseThrow().publicId
+        val memberId = accounts.requirePublicIdOf(row.userId)
         if (memberId != request.memberId || row.type != request.type || row.requestedAmount != request.amount ||
             row.expiresInDays != request.normalizedDays()) {
             throw CodedResponseStatusException(HttpStatus.CONFLICT, ApiErrorCodes.IDEMPOTENCY_KEY_CONFLICT,

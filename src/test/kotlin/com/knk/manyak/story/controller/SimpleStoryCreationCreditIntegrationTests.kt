@@ -1,10 +1,10 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.CreditPolicyKey
 import com.knk.manyak.credit.service.CreditPolicyService
@@ -20,23 +20,20 @@ import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -50,10 +47,11 @@ import java.util.concurrent.atomic.AtomicInteger
  *
  * AI 클라이언트는 @Primary 페이크로 대체하며, compile 실패는 페이크 토글로 강제한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class SimpleStoryCreationCreditIntegrationTests {
+class SimpleStoryCreationCreditIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.story = scriptedFakeAiClientConfigFakeStoryAiClient
+    }
+
 
     companion object {
         // compileStory 호출 횟수. 잔액 부족 시 compile이 호출되지 않음을 검증한다(선차감 후 402).
@@ -132,14 +130,11 @@ class SimpleStoryCreationCreditIntegrationTests {
 
     private fun assertFailedWithoutStory(id: java.util.UUID) {
         assertThat(requests.findByRequestId(id)!!.status)
-            .isEqualTo(com.knk.manyak.story.entity.StoryCreationRequestStatus.FAILED)
+            .isEqualTo(com.knk.manyak.story.dto.StoryCreationRequestStatus.FAILED)
         assertThat(storyRepository.findAll()).isEmpty()
     }
 
-    @TestConfiguration
     class FakeAiClientConfig {
-        @Bean
-        @Primary
         fun fakeStoryAiClient(): StoryAiClient = object : StoryAiClient {
             override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse =
                 AiStorylinesResponse(stories = emptyList(), meta = AiResponseMeta())
@@ -431,8 +426,8 @@ class SimpleStoryCreationCreditIntegrationTests {
         requests.saveAndFlush(com.knk.manyak.story.entity.StoryCreationRequest(
             requestId = requestId,
             userId = user.id,
-            stage = com.knk.manyak.story.entity.StoryCreationStage.STORY_COMPLETION,
-            status = com.knk.manyak.story.entity.StoryCreationRequestStatus.PENDING,
+            stage = com.knk.manyak.story.dto.StoryCreationStage.STORY_COMPLETION,
+            status = com.knk.manyak.story.dto.StoryCreationRequestStatus.PENDING,
             updatedAt = java.time.Instant.now().minusSeconds(600),
         ))
         val timerCounts = listOf("success", "failure", "rejected").associateWith {
@@ -443,7 +438,7 @@ class SimpleStoryCreationCreditIntegrationTests {
             .expectStatus().isCreated.expectBody().returnResult().responseBody!!
 
         val reconciled = requests.findByRequestId(requestId)!!
-        assertThat(reconciled.status).isEqualTo(com.knk.manyak.story.entity.StoryCreationRequestStatus.COMPLETED)
+        assertThat(reconciled.status).isEqualTo(com.knk.manyak.story.dto.StoryCreationRequestStatus.COMPLETED)
         assertThat(reconciled.resultJson).isNotNull()
         assertThat(listOf("success", "failure", "rejected").associateWith {
             meterRegistry.find("manyak.story.creation.duration").tag("outcome", it).timer()?.count() ?: 0L
@@ -564,3 +559,5 @@ class SimpleStoryCreationCreditIntegrationTests {
             .exchange()
     }
 }
+
+private val scriptedFakeAiClientConfigFakeStoryAiClient = SimpleStoryCreationCreditIntegrationTests.FakeAiClientConfig().fakeStoryAiClient()

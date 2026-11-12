@@ -4,21 +4,22 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.PushCampaignRepository
+import com.knk.manyak.push.repository.PushTargetRepository
 import com.knk.manyak.push.service.FcmPushSender
 import com.knk.manyak.push.service.PromotionPushService
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.bean.override.mockito.MockitoBean
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -26,18 +27,20 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-@SpringBootTest
-class CampaignLifecycleIntegrationTests {
+class CampaignLifecycleIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var storyReader: com.knk.manyak.story.service.StoryPlayReader
+    @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var campaigns: PushCampaignRepository
     @Autowired private lateinit var cleaner: DatabaseCleaner
-    @MockitoSpyBean private lateinit var users: UserRepository
-    @MockitoBean private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var users: UserRepository
+    @Autowired private lateinit var targets: PushTargetRepository
+    @Autowired private lateinit var sender: FcmPushSender
     private val now = Instant.parse("2026-10-21T03:00:00Z")
-    @BeforeEach fun clean() { cleaner.cleanAll(); reset(users, sender) }
-    private fun service(at: Instant = now) = PromotionPushService(campaigns, users, sender, stories, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications, notices = notices)
+    @BeforeEach fun clean() { cleaner.cleanAll(); reset(users, targets, sender) }
+    private fun service(at: Instant = now) = PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications, notices = noticeService)
     private fun row(start: Instant? = null) = campaigns.save(PushCampaign(title = "예약", body = "본문", scheduledAt = now,
         status = if (start == null) PushCampaignStatus.SCHEDULED else PushCampaignStatus.SENDING, startedAt = start,
         targetCount = 4, sentCount = 2))
@@ -50,8 +53,8 @@ class CampaignLifecycleIntegrationTests {
             override fun getZone() = ZoneOffset.UTC
             override fun withZone(zone: java.time.ZoneId): Clock = this
         }
-        doAnswer { at = at.plusSeconds(60); emptyList<Long>() }.`when`(users).findMarketingPushTargetIds()
-        PromotionPushService(campaigns, users, sender, stories, clock, notifications = notifications, notices = notices).sendDue(now)
+        doAnswer { at = at.plusSeconds(60); emptyList<Long>() }.`when`(targets).findMarketingPushTargetIds()
+        PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader, clock, notifications = notifications, notices = noticeService).sendDue(now)
         assertThat(campaigns.findAll().map { it.startedAt }.sortedBy { it }).containsExactly(now, now.plusSeconds(60))
     }
 
@@ -77,7 +80,7 @@ class CampaignLifecycleIntegrationTests {
         val campaign = row()
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
-        doAnswer { entered.countDown(); check(release.await(20, TimeUnit.SECONDS)); emptyList<Long>() }.`when`(users).findMarketingPushTargetIds()
+        doAnswer { entered.countDown(); check(release.await(20, TimeUnit.SECONDS)); emptyList<Long>() }.`when`(targets).findMarketingPushTargetIds()
         val pool = Executors.newSingleThreadExecutor()
         val logger = LoggerFactory.getLogger(PromotionPushService::class.java) as Logger
         val appender = ListAppender<ILoggingEvent>().apply { start() }

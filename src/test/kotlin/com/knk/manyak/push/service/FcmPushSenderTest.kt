@@ -6,10 +6,11 @@ import com.google.firebase.messaging.FirebaseMessagingException
 import com.google.firebase.messaging.Message
 import com.google.firebase.messaging.MessagingErrorCode
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.entity.DevicePushToken
-import com.knk.manyak.push.entity.PushPlatform
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
@@ -46,7 +47,8 @@ class FcmPushSenderTest {
     private val repository: DevicePushTokenRepository = mock(DevicePushTokenRepository::class.java)
     private val userRepository: UserRepository = mock(UserRepository::class.java)
     private val registry = SimpleMeterRegistry()
-    private val sender = FcmPushSender(messaging, repository, userRepository, registry)
+    private val accounts = AccountQueryService(userRepository)
+    private val sender = FcmPushSender(messaging, repository, accounts, registry)
 
     @BeforeEach
     fun setUp() {
@@ -69,7 +71,7 @@ class FcmPushSenderTest {
     fun `이프 안내는 금액 없는 데이터와 높은 우선순위 TTL을 보내고 로컬 결과를 기록한다`() {
         val now = Instant.parse("2026-10-25T01:00:00Z")
         val deliveries = mock(PushDeliveryService::class.java)
-        val local = FcmPushSender(messaging, repository, userRepository, registry,
+        val local = FcmPushSender(messaging, repository, accounts, registry,
             clock = Clock.fixed(now, ZoneOffset.UTC), deliveries = deliveries)
         `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "expiry")))
         val data = mapOf("type" to "CREDIT_EXPIRY_REMINDER", "title" to "이프 만료 예정 안내",
@@ -92,7 +94,7 @@ class FcmPushSenderTest {
     fun `FCM 미설정이면 이프 안내를 FCM_DISABLED로 기록하고 FCM을 호출하지 않는다`() {
         val now = Instant.parse("2026-10-25T01:00:00Z")
         val deliveries = mock(PushDeliveryService::class.java)
-        val disabled = FcmPushSender(null, repository, userRepository, registry,
+        val disabled = FcmPushSender(null, repository, accounts, registry,
             clock = Clock.fixed(now, ZoneOffset.UTC), deliveries = deliveries)
         val messageId = "credit-expiry:$publicId:2026-10-25"
 
@@ -113,7 +115,7 @@ class FcmPushSenderTest {
 
     @Test
     fun `서비스 계정이 없으면 아무것도 하지 않는다`() {
-        val disabled = FcmPushSender(null, repository, userRepository, registry)
+        val disabled = FcmPushSender(null, repository, accounts, registry)
 
         disabled.sendToUser(7L, mapOf("type" to "STORY_COMPLETED"))
 
@@ -188,7 +190,7 @@ class FcmPushSenderTest {
         val midnight = Instant.parse("2026-10-17T15:00:00Z")
         val clock = mock(Clock::class.java)
         `when`(clock.instant()).thenReturn(midnight.minusSeconds(2), midnight.minusMillis(500), midnight)
-        val sender = FcmPushSender(messaging, repository, userRepository, registry, clock = clock)
+        val sender = FcmPushSender(messaging, repository, accounts, registry, clock = clock)
         `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(
             listOf(token(1, "a"), token(2, "b"), token(3, "c"), token(4, "d")),
         )
@@ -205,7 +207,7 @@ class FcmPushSenderTest {
     @Test
     fun `이미 만료된 WEB 기기에는 발송하지 않는다`() {
         val expiry = Instant.parse("2026-10-17T15:00:00Z")
-        val sender = FcmPushSender(messaging, repository, userRepository, registry, clock = Clock.fixed(expiry, ZoneOffset.UTC))
+        val sender = FcmPushSender(messaging, repository, accounts, registry, clock = Clock.fixed(expiry, ZoneOffset.UTC))
         `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(
             listOf(token(1, "web").apply { platform = PushPlatform.WEB }),
         )
@@ -319,7 +321,7 @@ class FcmPushSenderTest {
     @Test
     fun `WEB은 설정한 기본 주소와 아이콘을 사용하고 딥링크가 있으면 우선한다`() {
         val configuredSender = FcmPushSender(
-            messaging, repository, userRepository, registry,
+            messaging, repository, accounts, registry,
             webIconUrl = "https://web.example/icon.png", webBaseUrl = "https://web.example",
         )
         val web = token(1, "web").apply { platform = PushPlatform.WEB }

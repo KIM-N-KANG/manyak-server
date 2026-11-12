@@ -1,12 +1,15 @@
 package com.knk.manyak.notice.dto
 
 import com.fasterxml.jackson.annotation.JsonInclude
-import com.knk.manyak.notice.entity.NoticeStatus
-import com.knk.manyak.notice.entity.NoticeTag
+import com.knk.manyak.notice.dto.NoticeStatus
+import com.knk.manyak.notice.dto.NoticeTag
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import jakarta.validation.constraints.*
 import java.time.Instant
 import java.util.UUID
+
+/** 알림 회차가 읽는 공지 값(NOTIFICATION 3-2-8): 딥링크 경로값, 게시 상태, 태그. */
+data class NoticePublication(val publicId: UUID, val status: NoticeStatus, val tag: NoticeTag)
 
 @JsonIgnoreProperties(value = ["notificationTitle", "notificationBody"])
 data class CreateNoticeRequest(

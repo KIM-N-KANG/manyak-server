@@ -3,15 +3,15 @@ package com.knk.manyak.auth.controller
 import com.knk.manyak.auth.consent.ConsentTokenStore
 import com.knk.manyak.auth.consent.SocialConsentService
 import com.knk.manyak.credit.service.GuestTrialLimitService
-import com.knk.manyak.user.consent.UserConsentRequest
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+import com.knk.manyak.support.ConsentGateIntegrationTest
+import com.knk.manyak.auth.consent.UserConsentRequest
 import org.mockito.Mockito.doAnswer
 import org.mockito.Mockito.doCallRealMethod
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import com.knk.manyak.auth.entity.SocialProvider
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.SocialProvider
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.jwt.JwtTokenProvider
@@ -20,22 +20,14 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 
-@ActiveProfiles("test")
-@Import(FakeSocialLoginConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.auth.consent-gate.enabled=true"])
-class SocialConsentIntegrationTests {
+class SocialConsentIntegrationTests : ConsentGateIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var socials: SocialAccountRepository
@@ -43,10 +35,10 @@ class SocialConsentIntegrationTests {
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var redis: StringRedisTemplate
-    @MockitoSpyBean private lateinit var analytics: com.knk.manyak.global.observability.analytics.ServerAnalytics
-    @MockitoSpyBean private lateinit var codes: ConsentTokenStore
+    @Autowired private lateinit var analytics: com.knk.manyak.global.observability.analytics.ServerAnalytics
+    @Autowired private lateinit var codes: ConsentTokenStore
     @Autowired private lateinit var service: SocialConsentService
-    @Autowired private lateinit var consentService: com.knk.manyak.user.consent.UserConsentService
+    @Autowired private lateinit var consentService: com.knk.manyak.auth.consent.UserConsentService
     @Autowired private lateinit var trials: GuestTrialLimitService
     private val mapper = ObjectMapper()
 
@@ -109,13 +101,13 @@ class SocialConsentIntegrationTests {
     @Test fun `버전 검증이 누락 검사보다 먼저이며 오류는 코드를 소비하지 않는다`() {
         val code = start()["consentToken"].asText()
         complete(code, """{"terms":"old"}""").expectStatus().isBadRequest.expectBody().jsonPath("$.code").isEqualTo("CONSENT_VERSION_MISMATCH")
-        org.mockito.Mockito.verify(analytics).socialLoginFailed(SocialProvider.GOOGLE,
+        org.mockito.Mockito.verify(analytics).socialLoginFailed("google",
             com.knk.manyak.global.observability.analytics.AnalyticsErrorType.VALIDATION)
         assertThat(codes.find(code)).isNotNull()
         complete(code, """{"terms":"v1.4"}""").expectStatus().isBadRequest.expectBody().jsonPath("$.code").isEqualTo("CONSENT_REQUIRED_MISSING")
-        org.mockito.Mockito.verify(analytics, org.mockito.Mockito.times(2)).socialLoginFailed(SocialProvider.GOOGLE,
+        org.mockito.Mockito.verify(analytics, org.mockito.Mockito.times(2)).socialLoginFailed("google",
             com.knk.manyak.global.observability.analytics.AnalyticsErrorType.VALIDATION)
-        org.mockito.Mockito.verify(analytics, org.mockito.Mockito.never()).socialLoginFailed(SocialProvider.GOOGLE,
+        org.mockito.Mockito.verify(analytics, org.mockito.Mockito.never()).socialLoginFailed("google",
             com.knk.manyak.global.observability.analytics.AnalyticsErrorType.SERVER)
         assertThat(codes.find(code)).isNotNull()
         assertThat(count("users")).isZero()
@@ -356,7 +348,7 @@ class SocialConsentIntegrationTests {
             .`when`(codes).consume(code)
         complete(code).expectStatus().is5xxServerError
         assertThat(org.mockito.Mockito.mockingDetails(analytics).invocations.count { it.method.name == "socialLoginSucceeded" }).isZero()
-        org.mockito.Mockito.verify(analytics).socialLoginFailed(SocialProvider.GOOGLE,
+        org.mockito.Mockito.verify(analytics).socialLoginFailed("google",
             com.knk.manyak.global.observability.analytics.AnalyticsErrorType.SERVER)
         val before = jdbc.queryForList("SELECT * FROM user_consents ORDER BY doc_type")
         doCallRealMethod().`when`(codes).consume(code)

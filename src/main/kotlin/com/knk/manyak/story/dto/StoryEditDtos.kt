@@ -1,13 +1,16 @@
 package com.knk.manyak.story.dto
 
 import com.knk.manyak.image.service.ImageModerationStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
+
+/** 관리자 스토리 설정(ADMIN 4-2-7)이 받는 현재 저장값 수정 폼과 삭제 시각. 삭제된 스토리도 담는다. */
+data class CurrentStoryForm(val form: StoryEditFormResponse, val deletedAt: java.time.Instant?)
 
 /**
  * 스토리 수정 폼 응답(스펙 §4-3-8). 사용자 표시용 상세(GET /stories/{id})와 달리 통글 4필드까지 포함한 편집 가능 필드

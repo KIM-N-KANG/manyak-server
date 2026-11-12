@@ -11,10 +11,12 @@ import org.slf4j.LoggerFactory
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.security.oauth2.jwt.JwtException
 import com.knk.manyak.auth.dto.TokenResponse
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.token.AuthTokenService
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
+import com.knk.manyak.credit.service.AccountCreditAdapter
+import com.knk.manyak.credit.service.AttendanceRewardService
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.GuestTrialLimitService
 import org.assertj.core.api.Assertions.assertThat
@@ -72,8 +74,10 @@ class SocialLoginServiceTest {
         `when`(authTokenService.issueTokens(anyUser())).thenReturn(TokenResponse("access", "refresh", 1800))
         return SocialLoginService(
             mapOf(SocialProvider.GOOGLE to verifier, SocialProvider.KAKAO to verifier),
-            registrar, authTokenService, creditWalletService, guestTrialLimitService,
-            userRepository, serverAnalytics, creditPolicyService,
+            registrar, authTokenService,
+            // 실제 어댑터로 감싸 크레딧 서비스 호출 인자(지급량, 사유, 멱등 키)를 그대로 단언한다(KNK-2064).
+            AccountCreditAdapter(guestTrialLimitService, creditPolicyService, creditWalletService, mock(AttendanceRewardService::class.java)),
+            userRepository, serverAnalytics,
         )
     }
 
@@ -154,7 +158,7 @@ class SocialLoginServiceTest {
         serviceWith(fakeVerifier("kakao-sub")).login(SocialProvider.KAKAO, "dummy")
 
         val emitted = mockingDetails(serverAnalytics).invocations.single { it.method.name == "socialLoginSucceeded" }
-        assertThat(emitted.getArgument<SocialProvider>(0)).isEqualTo(SocialProvider.KAKAO)
+        assertThat(emitted.getArgument<String>(0)).isEqualTo("kakao")
         assertThat(emitted.getArgument<Boolean>(2)).isTrue()
     }
 
@@ -165,10 +169,10 @@ class SocialLoginServiceTest {
         `when`(registrar.createUserAndAccount(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(user)
         val service = serviceWith(fakeVerifier("sub"))
         service.login(SocialProvider.GOOGLE, "token")
-        verify(serverAnalytics).socialLoginSucceeded(SocialProvider.GOOGLE, user.publicId.toString(), true, true)
+        verify(serverAnalytics).socialLoginSucceeded("google", user.publicId.toString(), true, true)
         `when`(registrar.findExistingUser(anyProvider(), anySocialUserInfo(), anyInstant())).thenReturn(user)
         service.login(SocialProvider.GOOGLE, "token")
-        verify(serverAnalytics).socialLoginSucceeded(SocialProvider.GOOGLE, user.publicId.toString(), false, false)
+        verify(serverAnalytics).socialLoginSucceeded("google", user.publicId.toString(), false, false)
     }
 
     @Test
@@ -181,7 +185,7 @@ class SocialLoginServiceTest {
             .isInstanceOf(ResponseStatusException::class.java)
 
         val emitted = mockingDetails(serverAnalytics).invocations.single { it.method.name == "socialLoginFailed" }
-        assertThat(emitted.getArgument<SocialProvider>(0)).isEqualTo(SocialProvider.KAKAO)
+        assertThat(emitted.getArgument<String>(0)).isEqualTo("kakao")
     }
 
     @Test
@@ -365,7 +369,8 @@ class SocialLoginServiceTest {
                 assertThat(response.body!!.message).isEqualTo(reason)
                 assertThat(response.body!!.path).isEqualTo(path)
                 assertThat(response.body!!.details).isEmpty()
-                verify(serverAnalytics).socialLoginFailed(provider, expectedType)
+                // 분석 이벤트에는 소문자 표기 제공자가 실린다(ServerAnalytics가 이 값으로 이벤트명을 고른다).
+                verify(serverAnalytics).socialLoginFailed(if (provider == SocialProvider.GOOGLE) "google" else "kakao", expectedType)
                 verifyNoInteractions(registrar, authTokenService)
                 assertThat(appender.list).hasSize(1)
                 for (event in appender.list) {

@@ -2,8 +2,7 @@ package com.knk.manyak.chat.service
 
 import com.knk.manyak.chat.entity.StoryChatSummary
 import com.knk.manyak.chat.repository.StoryChatSummaryRepository
-
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChatRepository
@@ -11,12 +10,11 @@ import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -27,9 +25,7 @@ import java.util.concurrent.TimeUnit
  * 같은 마지막 턴에 대한 동시 재생성 둘이 각자 마지막 턴 검사를 통과해도, 채팅 행 비관적 락으로 직렬화되어
  * regenerated_count 증가가 lost update 없이 정확히 1가 되는지(=대사 완료 수가 charge 수와 일치) 고정한다.
  */
-@ActiveProfiles("test")
-@SpringBootTest
-class ChatRegenerateConcurrencyIntegrationTests {
+class ChatRegenerateConcurrencyIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var chatTurnPersister: ChatTurnPersister
     @Autowired private lateinit var storyRepository: StoryRepository

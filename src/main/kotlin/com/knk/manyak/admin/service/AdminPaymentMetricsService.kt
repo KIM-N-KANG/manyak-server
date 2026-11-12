@@ -3,6 +3,7 @@ package com.knk.manyak.admin.service
 import com.knk.manyak.admin.config.AdminDashboardProperties
 import com.knk.manyak.admin.dto.*
 import com.knk.manyak.admin.repository.AdminPaymentMetricsRepository
+import com.knk.manyak.adminkit.query.AdminDateRange
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock

@@ -1,9 +1,11 @@
 package com.knk.manyak.story.service
 
-import com.knk.manyak.story.entity.ParentCreationLink
+import com.knk.manyak.global.observability.DeviceIdHasher
+import com.knk.manyak.story.dto.ParentCreationLink
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationRequestStatusResponse
+import com.knk.manyak.story.dto.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationRequest
-import com.knk.manyak.story.entity.StoryCreationRequestStatus
-import com.knk.manyak.story.entity.StoryCreationStage
 import com.knk.manyak.story.entity.isOwnedBy
 import com.knk.manyak.story.entity.parentCreationLink
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
@@ -14,6 +16,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
 import tools.jackson.core.JacksonException
@@ -37,8 +40,9 @@ import java.util.UUID
 class StoryCreationRequestRecorder(
     private val repository: StoryCreationRequestRepository,
     private val objectMapper: ObjectMapper,
-    private val drafts: com.knk.manyak.user.draft.StoryDraftRepository,
-    private val users: com.knk.manyak.auth.repository.UserRepository,
+    private val deviceIdHasher: DeviceIdHasher,
+    private val drafts: com.knk.manyak.story.draft.StoryDraftRepository,
+    private val locks: com.knk.manyak.auth.service.AccountLockService,
     // 이 시간(초)보다 오래 PENDING인 행은 실행 중 프로세스가 죽은 것으로 보고 재실행을 허용한다(무한 409 방지).
     // 최장 생성 동작(스토리 완성 AI 120초)보다 충분히 커, 진행 중인 정상 요청을 가로채지 않는다.
     @param:Value("\${manyak.story.pending-reclaim-after-seconds:300}")
@@ -50,6 +54,79 @@ class StoryCreationRequestRecorder(
     // PENDING 기록·상태 갱신을 본 저장 트랜잭션과 독립 커밋한다(복구 GET이 PENDING을 보게).
     private val txTemplate = TransactionTemplate(transactionManager).apply {
         propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
+    }
+
+    /**
+     * 소유자를 특정할 수 있으면 [execute]로 감싸 백그라운드 복구·멱등(스펙 §4-3-8)을 적용한다.
+     * 단 소유자를 특정할 수 없는 게스트(디바이스 헤더 없음)는 요청 행을 기록하지 않고 그대로 실행해 문서화된 400을 낸다 —
+     * 소유자 없는 요청 행을 남기면 아무도 소유할 수 없어, 올바른 디바이스로 재시도해도 409로 영구히 막힌다(Codex P2).
+     */
+    fun <T : Any> recordOrRun(
+        requestId: UUID,
+        stage: StoryCreationStage,
+        ownerUserId: Long?,
+        deviceId: String?,
+        responseType: Class<T>,
+        // 요청 행에 함께 기록할 재생성 체인 부모 링크(KNK-755). 체인이 없는 경로(스토리 완성)는 null이다.
+        parentLink: ParentCreationLink? = null,
+        // 콜백 인자는 (이 실행이 회수(reclaim)인지 — 완성 경로의 reconcile 게이트, Codex P1), 호환되지 않는 replay의
+        // fallback인지(중복 소모 방지), 요청 행에 실제로 기록된 체인(KNK-755)이다.
+        block: (
+            isReclaim: Boolean,
+            isIncompatibleReplayFallback: Boolean,
+            recordedParentLink: ParentCreationLink?,
+        ) -> T,
+        // COMPLETED 마킹 트랜잭션 안에서 실행할 부수 효과(KNK-1115 완성 푸시 발행). 기록하지 않는 경로는 부르지 않는다.
+        onCompleted: ((T) -> Unit)? = null,
+        validateNewRequest: (() -> Unit)? = null,
+        draftId: UUID? = null,
+    ): T {
+        // 요청에 있는 식별자를 둘 다 저장한다(회원이어도 디바이스 해시를 버리지 않음) — 인증 상태가 바뀌어도 어느 한쪽으로 소유가 매칭되게(Codex P2).
+        val ownerDeviceIdHash = deviceIdHashOrNull(deviceId)
+        if (ownerUserId == null && ownerDeviceIdHash == null) {
+            // 소유자를 특정할 수 없는 요청(회원도 아니고 디바이스 헤더도 없음)은 기록하지 않고 실행한다(소유자 없는 행 방지). 회수 아님.
+            validateNewRequest?.invoke()
+            return block(false, false, parentLink)
+        }
+        return execute(
+            requestId,
+            stage,
+            ownerUserId,
+            ownerDeviceIdHash,
+            responseType,
+            parentLink,
+            block,
+            onCompleted,
+            validateNewRequest,
+            draftId,
+        )
+    }
+
+    /** 디바이스 헤더를 소유 판정용 해시로 변환한다(원문 저장·비교 금지 — DeviceIdHasher). 공백·null은 미소유(null). */
+    fun deviceIdHashOrNull(deviceId: String?): String? =
+        deviceId?.takeIf { it.isNotBlank() }?.let(deviceIdHasher::hash)
+
+    /**
+     * 백그라운드 생성 복구 조회(스펙 §4-3-8). 소유 주체(회원 [userId] 또는 게스트 [deviceId])만 조회할 수 있고,
+     * 미존재·타인 요청은 404다. [StoryCreationRequestStatusResponse.result]는 COMPLETED일 때 원 POST 응답 본문과 동일하다.
+     */
+    @Transactional(readOnly = true)
+    fun getCreationRequest(
+        requestId: UUID,
+        userId: Long? = null,
+        deviceId: String? = null,
+    ): StoryCreationRequestStatusResponse {
+        val deviceIdHash = deviceIdHashOrNull(deviceId)
+        val row = repository.findByRequestId(requestId)
+            ?.takeIf { it.isOwnedBy(userId, deviceIdHash) }
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "생성 요청을 찾을 수 없습니다.")
+        return StoryCreationRequestStatusResponse(
+            stage = row.stage,
+            status = row.status,
+            result = row.resultJson
+                ?.takeIf { row.status == StoryCreationRequestStatus.COMPLETED }
+                ?.let { objectMapper.readTree(it) },
+        )
     }
 
     /**
@@ -216,7 +293,7 @@ class StoryCreationRequestRecorder(
     ): Long? =
         try {
             txTemplate.execute {
-                if (draftId != null && ownerUserId != null) users.findByIdForUpdate(ownerUserId)
+                if (draftId != null && ownerUserId != null) locks.lock(ownerUserId)
                 val row = repository.saveAndFlush(
                     StoryCreationRequest(
                         requestId = requestId,
@@ -242,7 +319,7 @@ class StoryCreationRequestRecorder(
         txTemplate.execute {
             // users → 생성 요청 → 초안 순서로 잠근다.
             // replay·진행 중 충돌은 초안을 건드리지 않는다.
-            if (draftId != null && ownerUserId != null) users.findByIdForUpdate(ownerUserId)
+            if (draftId != null && ownerUserId != null) locks.lock(ownerUserId)
             val row = repository.findByRequestIdForUpdate(requestId)
                 ?: throw ResponseStatusException(HttpStatus.CONFLICT, "이미 사용된 요청 ID입니다.")
             val claim = resolveExisting(row, stage, ownerUserId, ownerDeviceIdHash)
@@ -302,7 +379,7 @@ class StoryCreationRequestRecorder(
      *
      * 이 표시는 [block]의 저장 트랜잭션과 분리돼 있어, block이 스토리/세션을 커밋한 뒤 이 COMPLETED 표시 커밋 전에
      * 프로세스가 죽으면 행이 result 없이 PENDING으로 남는 좁은 창이 있다. 이 창의 회수 재실행은 스토리 완성 경로에서
-     * session.storyId로 응답을 재구성해 COMPLETED로 되돌린다(P2-10 해소, KNK-635 — SimpleStoryCreationService.reconcileCreatedSession).
+     * session.storyId로 응답을 재구성해 COMPLETED로 되돌린다(P2-10 해소, KNK-635 — SimpleStoryCompletionWriter.reconcileCreatedSession).
      */
     private fun updateStatus(
         id: Long,
@@ -315,7 +392,7 @@ class StoryCreationRequestRecorder(
         txTemplate.execute {
             // users → 생성 요청 → 초안 순서로 잠근다.
             // 소유자만 비잠금 조회해 대기 전에 엔티티 상태가 영속성 컨텍스트에 남지 않게 한다. 게스트는 사용자 잠금 없음.
-            repository.findUserIdById(id)?.let { users.findByIdForUpdate(it) }
+            repository.findUserIdById(id)?.let { locks.lock(it) }
             val row = repository.findByIdForUpdate(id)
                 ?: throw IllegalStateException("Story creation request row $id disappeared")
             row.status = status

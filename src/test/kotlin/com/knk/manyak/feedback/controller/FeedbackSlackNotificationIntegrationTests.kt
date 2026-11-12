@@ -2,6 +2,9 @@ package com.knk.manyak.feedback.controller
 
 import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.loopbackUrl
+import com.knk.manyak.support.startOnLoopback
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.assertj.core.api.Assertions.assertThat
@@ -10,10 +13,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -25,10 +25,7 @@ import java.util.concurrent.TimeUnit
  *
  * webhook URL 은 [MockWebServer] 주소를 @DynamicPropertySource 로 주입한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class FeedbackSlackNotificationIntegrationTests {
+class FeedbackSlackNotificationIntegrationTests : IntegrationTest() {
 
     companion object {
         private val slackServer = MockWebServer()
@@ -36,7 +33,7 @@ class FeedbackSlackNotificationIntegrationTests {
         @JvmStatic
         @BeforeAll
         fun startServer() {
-            slackServer.start()
+            slackServer.startOnLoopback()
         }
 
         @JvmStatic
@@ -48,7 +45,7 @@ class FeedbackSlackNotificationIntegrationTests {
         @JvmStatic
         @DynamicPropertySource
         fun registerWebhookUrl(registry: DynamicPropertyRegistry) {
-            registry.add("manyak.slack.feedback-webhook-url") { slackServer.url("/hook").toString() }
+            registry.add("manyak.slack.feedback-webhook-url") { slackServer.loopbackUrl("/hook") }
             // env(MANYAK_GOOGLE_FORM_FEEDBACK_ID) 오염까지 막아 실 구글 폼으로 발송하지 않도록 강제한다.
             registry.add("manyak.google-form.feedback.form-id") { "" }
         }

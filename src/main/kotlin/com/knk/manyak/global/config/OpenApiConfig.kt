@@ -1,11 +1,5 @@
 package com.knk.manyak.global.config
 
-import com.knk.manyak.chat.dto.ChangeChatSettingsRequest
-import com.knk.manyak.story.submission.StoryTakedownRequest
-import io.swagger.v3.oas.models.media.ObjectSchema
-import io.swagger.v3.oas.models.media.Schema
-import io.swagger.v3.oas.models.media.StringSchema
-import org.springdoc.core.customizers.OpenApiCustomizer
 import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.info.Info
@@ -39,52 +33,6 @@ class OpenApiConfig {
                         .description("access 토큰(HS256 JWT). `Authorization: Bearer <accessToken>` 로 보낸다."),
                 ),
             )
-
-    // springdoc 3.0.3의 KotlinNullablePropertyCustomizer는 @Schema의 types/nullable과 무관하게
-    // Kotlin nullable 프로퍼티에 null 타입을 추가한다. Nulls.FAIL로 null을 거절하는 이 요청만 보정한다.
-    @Bean
-    fun chatSettingsSchema(): OpenApiCustomizer = OpenApiCustomizer { api ->
-        val schema = api.components?.schemas?.get(ChangeChatSettingsRequest::class.java.simpleName)
-            ?: return@OpenApiCustomizer
-        for (name in listOf("model", "longResponse")) {
-            val property = schema.properties?.get(name) ?: continue
-            property.types = property.types?.filterTo(linkedSetOf()) { it != "null" }
-            property.nullable = false
-        }
-    }
-
-    // 관리자 스토리 설정(ADMIN 4-2-7) 응답은 모든 필드가 항상 실린다. 관리자 웹이 OpenAPI로 타입을 생성하므로
-    // springdoc이 내지 않는 required를 이 응답 스키마에만 채운다. null 허용은 Kotlin nullable이 그대로 낸다.
-    @Bean
-    fun adminStorySettingsRequired(): OpenApiCustomizer = OpenApiCustomizer { api ->
-        api.components?.schemas?.filterKeys { it.startsWith("AdminStorySettings") }?.values?.forEach { schema ->
-            schema.required = schema.properties?.keys?.toList()
-        }
-    }
-
-    // ADMIN 4-2-48도 nullable 평균을 포함해 응답 필드가 항상 존재한다.
-    @Bean
-    fun adminActivityHoursRequired(): OpenApiCustomizer = OpenApiCustomizer { api ->
-        api.components?.schemas?.filterKeys { it.startsWith("AdminActivityHours") }?.values?.forEach { schema ->
-            schema.required = schema.properties?.keys?.toList()
-        }
-    }
-
-    // MODERATION 4-2-10의 조건부 입력 규칙. 서비스 검증은 유지하고 문서에만 oneOf를 더한다.
-    @Bean
-    fun storyTakedownSchema(): OpenApiCustomizer = OpenApiCustomizer { api ->
-        val schema = api.components?.schemas?.get(StoryTakedownRequest::class.java.simpleName)
-            ?: return@OpenApiCustomizer
-        val predefined = ObjectSchema()
-            .addProperty("reasonCode", StringSchema()._enum(listOf("SEXUAL_CONTENT", "COPYRIGHT_INFRINGEMENT", "HATE_SPEECH")))
-            .addProperty("reasonDetail", Schema<Any>().types(linkedSetOf("null")))
-            .required(listOf("reasonCode"))
-        val other = ObjectSchema()
-            .addProperty("reasonCode", StringSchema()._enum(listOf("ETC")))
-            .addProperty("reasonDetail", StringSchema().minLength(1).maxLength(100).pattern("(?sU).*\\S.*"))
-            .required(listOf("reasonCode", "reasonDetail"))
-        schema.oneOf = listOf(predefined, other)
-    }
 
     companion object {
         /** 인증 필수 엔드포인트의 @SecurityRequirement(name = ...)와 일치해야 한다. */

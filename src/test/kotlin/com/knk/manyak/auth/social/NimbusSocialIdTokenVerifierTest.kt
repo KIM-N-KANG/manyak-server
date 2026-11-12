@@ -1,7 +1,7 @@
 package com.knk.manyak.auth.social
 
 import com.knk.manyak.auth.config.AuthConfig
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.JWSHeader
 import com.nimbusds.jose.crypto.RSASSASigner

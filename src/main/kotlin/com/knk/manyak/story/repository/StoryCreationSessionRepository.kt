@@ -23,13 +23,14 @@ interface StoryCreationSessionRepository : JpaRepository<StoryCreationSession, L
     fun findByIdForUpdate(id: Long): StoryCreationSession?
 
     /**
-     * 스토리 마이그레이션(KNK-389) 시, 클레임한 스토리에 연결된 생성 세션(user_id NULL)의 소유권도 함께 클레임한다.
+     * 스토리 마이그레이션(KNK-389) 시, 클레임한 스토리들에 연결된 생성 세션(user_id NULL)의 소유권도 함께 클레임한다.
+     * 한 요청에서 클레임한 스토리를 묶어 한 번에 갱신한다(KNK-2080).
      *
      * 세션 소유자가 NULL이면 storyline 평가/취소가 익명 취급으로 열리므로([StorylineRatingService]), 스토리와 소유권을 일치시킨다.
      */
     @Modifying
-    @Query("UPDATE StoryCreationSession s SET s.userId = :userId WHERE s.storyId = :storyId AND s.userId IS NULL")
-    fun claimByStoryId(@Param("storyId") storyId: Long, @Param("userId") userId: Long): Int
+    @Query("UPDATE StoryCreationSession s SET s.userId = :userId WHERE s.storyId IN :storyIds AND s.userId IS NULL")
+    fun claimByStoryIds(@Param("storyIds") storyIds: Collection<Long>, @Param("userId") userId: Long): Int
 
     /**
      * 완성 스토리 → 이 스토리를 만든 간편 제작 세션 역조회(KNK-751). 채팅 생성 시 creation_id를 1회 해석하는 데만 쓴다.

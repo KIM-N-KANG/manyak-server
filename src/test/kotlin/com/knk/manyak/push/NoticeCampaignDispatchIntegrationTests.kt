@@ -2,42 +2,49 @@ package com.knk.manyak.push
 
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
+import com.knk.manyak.notice.dto.NoticeStatus
+import com.knk.manyak.notice.dto.NoticeTag
 import com.knk.manyak.notice.entity.*
 import com.knk.manyak.notice.repository.NoticeRepository
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.dto.PushKind
+import com.knk.manyak.push.dto.PushPlatform
+import com.knk.manyak.push.dto.pushKind
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.*
+import com.knk.manyak.push.repository.PushTargetRepository
 import com.knk.manyak.push.service.*
 import com.knk.manyak.push.inbox.ScheduledNotificationWriter
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.bean.override.mockito.MockitoBean
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 
-@SpringBootTest(properties = ["manyak.push.mode=remote"])
-class NoticeCampaignDispatchIntegrationTests {
+class NoticeCampaignDispatchIntegrationTests : PushRemoteIntegrationTest() {
     @Autowired private lateinit var notices: NoticeRepository
     @Autowired private lateinit var campaigns: PushCampaignRepository
-    @MockitoSpyBean private lateinit var users: UserRepository
-    @MockitoBean private lateinit var sender: FcmPushSender
-    @MockitoBean private lateinit var store: com.knk.manyak.push.outbox.PushOutboxStore
-    @MockitoBean private lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
+    @Autowired private lateinit var users: UserRepository
+    @Autowired private lateinit var targets: PushTargetRepository
+    @Autowired private lateinit var sender: FcmPushSender
+    @Autowired private lateinit var store: com.knk.manyak.push.outbox.PushOutboxStore
+    @Autowired private lateinit var relay: com.knk.manyak.push.outbox.PushOutboxRelay
     private val messages = mutableListOf<com.knk.manyak.push.outbox.PushMessage>()
     @Autowired private lateinit var tokens: DevicePushTokenRepository
     @Autowired private lateinit var notifications: ScheduledNotificationWriter
     @Autowired private lateinit var outbox: ScheduledPushOutboxWriter
     @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var storyReader: com.knk.manyak.story.service.StoryPlayReader
+    @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var jdbc: JdbcTemplate
     private val now = Instant.parse("2026-10-30T03:00:00Z")
@@ -53,8 +60,8 @@ class NoticeCampaignDispatchIntegrationTests {
         owner = users.save(User(nickname = "수신 회원", marketingPushAgreedAt = Instant.EPOCH))
         tokens.save(DevicePushToken(userId = owner.id, token = "notice-target", platform = PushPlatform.ANDROID))
     }
-    private fun service(remote: Boolean, at: Instant = now) = PromotionPushService(campaigns, users, sender, stories,
-        Clock.fixed(at, ZoneOffset.UTC), if (remote) outbox else null, notifications = notifications, notices = notices)
+    private fun service(remote: Boolean, at: Instant = now) = PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader,
+        Clock.fixed(at, ZoneOffset.UTC), if (remote) outbox else null, notifications = notifications, notices = noticeService)
     private fun notice(tag: NoticeTag = NoticeTag.SERVICE, published: Boolean = true) = notices.save(Notice(
         title = "원문", body = "원문 본문", tag = tag, status = if (published) NoticeStatus.PUBLISHED else NoticeStatus.DRAFT,
         createdByUserId = owner.id))
@@ -74,8 +81,8 @@ class NoticeCampaignDispatchIntegrationTests {
         assertThat(failed.failureReason).isEqualTo("NOTICE_NOT_PUBLISHED")
         assertThat(failed.targetCount).isZero(); assertThat(failed.sentCount).isZero()
         assertThat(failed.startedAt).isEqualTo(now); assertThat(failed.finishedAt).isEqualTo(now)
-        verify(users, never()).findServicePushTargetIds()
-        verify(users, never()).findMarketingPushTargetIds()
+        verify(targets, never()).findServicePushTargetIds()
+        verify(targets, never()).findMarketingPushTargetIds()
         verifyNoInteractions(sender)
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_notifications", Long::class.java)).isZero()
         assertThat(messages).isEmpty()
@@ -99,8 +106,8 @@ class NoticeCampaignDispatchIntegrationTests {
         n.tag = NoticeTag.EVENT; notices.saveAndFlush(n)
         val result = service(remote).sendDue(now).single()
         assertThat(result.kind).isEqualTo(PushKind.MARKETING)
-        verify(users).findMarketingPushTargetIds()
-        verify(users, never()).findServicePushTargetIds()
+        verify(targets).findMarketingPushTargetIds()
+        verify(targets, never()).findServicePushTargetIds()
         if (remote) {
             assertThat(messages.single().type).isEqualTo("PROMOTION")
             assertThat(messages.single().kind).isEqualTo("MARKETING")
@@ -130,12 +137,12 @@ class NoticeCampaignDispatchIntegrationTests {
     @Test fun `선점 판정 뒤 게시 해제는 기다리지 않고 성공하며 그 회차는 발송한다`() {
         val n = notice()
         val c = campaign(n)
-        val targets = users.findServicePushTargetIds()
+        val serviceTargets = targets.findServicePushTargetIds()
         doAnswer {
             n.status = NoticeStatus.DRAFT
             notices.saveAndFlush(n)
-            targets
-        }.`when`(users).findServicePushTargetIds()
+            serviceTargets
+        }.`when`(targets).findServicePushTargetIds()
         val result = service(false).sendDue(now).single()
         assertThat(result.failed).isFalse()
         assertThat(campaigns.findById(c.id).orElseThrow().status).isEqualTo(PushCampaignStatus.SENT)

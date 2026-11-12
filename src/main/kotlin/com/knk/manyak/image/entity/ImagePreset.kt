@@ -1,7 +1,9 @@
 package com.knk.manyak.image.entity
 
-import com.knk.manyak.story.entity.StoryCreationTag
+import com.knk.manyak.image.dto.ImagePresetType
+import jakarta.persistence.CollectionTable
 import jakarta.persistence.Column
+import jakarta.persistence.ElementCollection
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
 import jakarta.persistence.Enumerated
@@ -9,19 +11,8 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
-import jakarta.persistence.JoinTable
-import jakarta.persistence.ManyToMany
 import jakarta.persistence.Table
 import java.time.Instant
-
-/**
- * 팀 제작 이미지 자산의 종류. `prefix`는 S3 객체 키와 서빙 URL의 경로 조각이다(스펙 §4-3-9).
- */
-enum class ImagePresetType(val prefix: String) {
-    THUMBNAIL("thumbnails"),
-    BACKGROUND("backgrounds"),
-    CHARACTER("characters"),
-}
 
 /**
  * 팀 제작 이미지 카탈로그. 기존 스토리의 프리셋 키와 계획된 배경 기능을 위해 유지한다(스펙 §4-3-9).
@@ -59,14 +50,12 @@ class ImagePreset(
     @Column(length = 50)
     val prop: String? = null,
 
-    // 카탈로그의 장르는 복수(썸네일 최대 3개)이며 GENRE 태그 마스터를 참조한다.
-    @ManyToMany
-    @JoinTable(
-        name = "image_preset_genres",
-        joinColumns = [JoinColumn(name = "image_preset_id")],
-        inverseJoinColumns = [JoinColumn(name = "tag_id")],
-    )
-    val genres: Set<StoryCreationTag> = emptySet(),
+    // 카탈로그의 장르는 복수(썸네일 최대 3개)이며 GENRE 태그 마스터(story_creation_tags)의 ID다.
+    // 이미지는 story를 모르므로 엔티티 대신 ID만 든다. 태그 존재는 마이그레이션의 FK가 강제한다.
+    @ElementCollection
+    @CollectionTable(name = "image_preset_genres", joinColumns = [JoinColumn(name = "image_preset_id")])
+    @Column(name = "tag_id", nullable = false)
+    val genres: Set<Long> = emptySet(),
 
     @Column(name = "deactivated_at")
     var deactivatedAt: Instant? = null,

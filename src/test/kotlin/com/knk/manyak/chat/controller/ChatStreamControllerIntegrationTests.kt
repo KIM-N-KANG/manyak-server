@@ -3,7 +3,7 @@ package com.knk.manyak.chat.controller
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChoiceRepository
@@ -17,22 +17,17 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatStreamControllerIntegrationTests {
+class ChatStreamControllerIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var generationStore: com.knk.manyak.chat.service.ChatGenerationStore
 
@@ -254,6 +249,39 @@ class ChatStreamControllerIntegrationTests {
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
         generationStore.awaitGenerationReleased(chatId)
         return body
+    }
+
+    @Test
+    fun `이어쓰기·재생성 저장 로그의 story_id는 스토리 공개 식별자다`() {
+        val logger = LoggerFactory.getLogger(StructuredLogger::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().apply { start() }
+        logger.addAppender(appender)
+        try {
+            val story = seedStory()
+            val session = storyChatRepository.save(StoryChat(storyId = story.id))
+            stream(session.publicId.toString(), "첫 입력")
+            val turnId = storyMessageRepository.findByChatIdOrderByMessageOrderAsc(session.id).last().id
+
+            restTestClient.post()
+                .uri("/api/v1/chats/${session.publicId}/turns/regenerate/stream")
+                .header("X-Manyak-Device-Id", "test-device")
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .body("""{"turnId":$turnId,"realtimeImage":false}""")
+                .exchange()
+                .expectStatus().isOk
+                .expectBody(String::class.java)
+                .returnResult()
+            generationStore.awaitGenerationReleased(session.publicId.toString())
+
+            for (event in listOf("user_message_saved", "ai_response_saved", "ai_response_regenerated")) {
+                val logged = appender.list.filter { it.formattedMessage.contains("event_name=$event") }
+                assertThat(logged).describedAs(event).hasSize(1)
+                assertThat(logged.single().formattedMessage).describedAs(event).contains("story_id=${story.publicId}")
+            }
+        } finally {
+            logger.detachAppender(appender)
+        }
     }
 
     @Test

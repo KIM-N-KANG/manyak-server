@@ -4,12 +4,13 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.loopbackUrl
+import com.knk.manyak.support.startOnLoopback
 import okhttp3.mockwebserver.*
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -17,21 +18,21 @@ import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.ObjectMapper
 import java.time.*
 
-@AutoConfigureRestTestClient
 @org.springframework.context.annotation.Import(AdminMetricsTestClock::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.admin.dashboard.excluded-user-ids="])
-class AdminMetricsIntegrationTests {
+@org.springframework.test.context.TestPropertySource(properties = ["manyak.admin.dashboard.excluded-user-ids="])
+class AdminMetricsIntegrationTests : IntegrationTest() {
     companion object {
-        private val server = MockWebServer().apply { start() }
-        private val langfuse = MockWebServer().apply { start() }
+        private val server = MockWebServer().startOnLoopback()
+        private val langfuse = MockWebServer().startOnLoopback()
         @JvmStatic @DynamicPropertySource fun properties(r: DynamicPropertyRegistry) {
-            r.add("manyak.admin.langfuse.host") { langfuse.url("/").toString() }
+            r.add("manyak.admin.langfuse.host") { langfuse.loopbackUrl("/") }
             r.add("manyak.admin.langfuse.public-key") { "mock" }
             r.add("manyak.admin.langfuse.secret-key") { "mock" }
             r.add("manyak.admin.langfuse.environment") { "prod" }
+            // 운영 기본 1초 호출 간격은 호출 수만큼 실대기가 된다. 간격 보장 자체는 LangfuseCostSnapshotsTests가 검증한다(KNK-2058).
+            r.add("manyak.admin.langfuse.call-interval") { "10ms" }
             r.add("manyak.analytics.amplitude.api-key") { "mock" }; r.add("manyak.analytics.amplitude.secret-key") { "mock" }
-            r.add("manyak.analytics.amplitude.dashboard-base-url") { server.url("/").toString() }
+            r.add("manyak.analytics.amplitude.dashboard-base-url") { server.loopbackUrl("/") }
         }
         @JvmStatic @AfterAll fun stop() { server.shutdown(); langfuse.shutdown() }
     }
@@ -294,10 +295,10 @@ class AdminMetricsIntegrationTests {
         fun user(name: String, at: Instant = start, migrated: Instant? = null) = users.save(User(nickname=name, createdAt=at, migratedAt=migrated))
         val a=user("구글", migrated=start.plusSeconds(100)); val b=user("카카오"); user("연동없음", migrated=start.plusSeconds(100))
         val before=user("이전",start.minusMillis(1)); user("연동없는 이전",start.minusMillis(1)); user("다음",end)
-        socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=before.id,provider=com.knk.manyak.auth.entity.SocialProvider.KAKAO,providerUserId="before",connectedAt=start.minusMillis(1)))
-        socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=a.id,provider=com.knk.manyak.auth.entity.SocialProvider.GOOGLE,providerUserId="g",connectedAt=start))
-        socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=a.id,provider=com.knk.manyak.auth.entity.SocialProvider.KAKAO,providerUserId="kg",connectedAt=start.plusSeconds(1)))
-        socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=b.id,provider=com.knk.manyak.auth.entity.SocialProvider.KAKAO,providerUserId="k",connectedAt=start))
+        socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=before.id,provider=com.knk.manyak.auth.dto.SocialProvider.KAKAO,providerUserId="before",connectedAt=start.minusMillis(1)))
+        socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=a.id,provider=com.knk.manyak.auth.dto.SocialProvider.GOOGLE,providerUserId="g",connectedAt=start))
+        socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=a.id,provider=com.knk.manyak.auth.dto.SocialProvider.KAKAO,providerUserId="kg",connectedAt=start.plusSeconds(1)))
+        socials.save(com.knk.manyak.auth.entity.SocialAccount(userId=b.id,provider=com.knk.manyak.auth.dto.SocialProvider.KAKAO,providerUserId="k",connectedAt=start))
         val story=stories.save(com.knk.manyak.story.entity.Story(userId=a.id,title="집계",genre="판타지"))
         fun chat(owner: Long?, turn: Int, model: String="LITE", persona: String?=null, at: Instant=start, deleted: Instant?=null) =
             chats.save(com.knk.manyak.chat.entity.StoryChat(storyId=story.id,userId=owner,currentTurn=turn,modelCode=model,personaNameSnapshot=persona,createdAt=at,deletedAt=deleted))

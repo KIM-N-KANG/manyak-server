@@ -1,21 +1,22 @@
 package com.knk.manyak.story.service
 
 import com.knk.manyak.image.service.ImageModeration
-import com.knk.manyak.story.entity.CharacterImageSnapshot
-import com.knk.manyak.story.entity.EndingSnapshot
-import com.knk.manyak.story.entity.MainEventSnapshot
-import com.knk.manyak.story.entity.StartSettingSnapshot
+import com.knk.manyak.story.snapshot.CharacterImageSnapshot
+import com.knk.manyak.story.snapshot.EndingSnapshot
+import com.knk.manyak.story.snapshot.MainEventSnapshot
+import com.knk.manyak.story.snapshot.StartSettingSnapshot
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryPublicSnapshot
+import com.knk.manyak.story.snapshot.StoryPublicSnapshot
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StoryPublicSnapshotRow
 import com.knk.manyak.story.entity.StorySetting
-import com.knk.manyak.story.entity.StorySettingsSnapshot
+import com.knk.manyak.story.snapshot.StorySettingsSnapshot
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
+import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StorySettingRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
@@ -38,6 +39,7 @@ class StoryPublicSnapshotService(
     private val storyMainEventRepository: StoryMainEventRepository,
     private val storyEndingRepository: StoryEndingRepository,
     private val storyPublicSnapshotRepository: StoryPublicSnapshotRepository,
+    private val storyRepository: StoryRepository,
 ) {
 
     /**
@@ -85,8 +87,12 @@ class StoryPublicSnapshotService(
      * 조립 코드는 여전히 한 갈래다.
      *
      * 추천 입력은 담지 않는다: 턴 요청(`ChatTurnAiRequest`)에 실리지 않는다.
+     *
+     * 스토리를 id로 받는다(채팅이 스토리 엔티티를 쥐지 않게, KNK-2055). 호출부(턴 조립)가 같은 트랜잭션에서 이미 이
+     * 스토리를 읽었으므로 아래 조회는 영속성 컨텍스트에서 끝나 쿼리가 늘지 않는다. 호출부는 스토리가 있을 때만 부른다.
      */
-    fun captureTurnMaterial(story: Story, startSettingId: Long?): StoryPublicSnapshot {
+    fun captureTurnMaterial(storyId: Long, startSettingId: Long?): StoryPublicSnapshot {
+        val story = storyRepository.findById(storyId).orElseThrow()
         val startSetting = startSettingId?.let { storyStartSettingRepository.findById(it).orElse(null) }
         return StoryPublicSnapshot(
             protagonistName = story.protagonistName,

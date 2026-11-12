@@ -1,6 +1,6 @@
 package com.knk.manyak.auth.link
 
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import java.time.Instant

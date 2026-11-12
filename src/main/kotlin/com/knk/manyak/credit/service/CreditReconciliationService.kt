@@ -1,10 +1,9 @@
 package com.knk.manyak.credit.service
 
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
+import com.knk.manyak.credit.port.StoryCreationProgress
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.global.observability.StructuredLogger
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
-import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.data.domain.PageRequest
@@ -20,7 +19,7 @@ data class ReconciliationResult(val groupsScanned: Int, val refundsEmitted: Int,
 class CreditReconciliationService(
     private val transactionRepository: CreditTransactionRepository,
     private val creditWalletService: CreditWalletService,
-    private val storyCreationSessionRepository: StoryCreationSessionRepository,
+    private val storyCreationProgress: StoryCreationProgress,
     private val structuredLogger: StructuredLogger,
     // 그룹의 마지막 charge가 이 시간보다 오래됐을 때만 대사한다(in-flight 경합 배제). SSE 타임아웃(60s)·컴파일(수초)보다 충분히 크게.
     @param:Value("\${manyak.credit.reconciliation.charge-age-threshold:PT15M}")
@@ -110,10 +109,11 @@ class CreditReconciliationService(
             // 않는 유료 CHAT_TURN charge라, 재생성 완료분을 더하지 않으면 성공한 재생성이 초과 환불된다(KNK-406).
             CHAT_REF_TYPE -> transactionRepository.findLegacyChatCompletedCount(userId, refId)
                 ?.coerceAtLeast(0) ?: NEVER_REFUND
-            STORY_REF_TYPE ->
-                storyCreationSessionRepository.findById(refId)
-                    .map { if (it.status == StoryCreationSessionStatus.STORY_CREATED) 1L else 0L }
-                    .orElse(NEVER_REFUND)
+            STORY_REF_TYPE -> when (storyCreationProgress.isStoryCreated(refId)) {
+                true -> 1L
+                false -> 0L
+                null -> NEVER_REFUND
+            }
             else -> NEVER_REFUND
         }
 
@@ -121,7 +121,7 @@ class CreditReconciliationService(
         const val CHAT_TURN_CANDIDATE_LIMIT = 500
         val CONSUMPTION_REASONS = listOf(CreditReason.STORY_CREATION, CreditReason.CHAT_TURN)
 
-        // 소모 행의 ref_type. 소비자(ChatService·SimpleStoryCreationService)의 차감 refType과 일치해야 한다.
+        // 소모 행의 ref_type. 소비자(ChatService·SimpleStoryCompletionService)의 차감 refType과 일치해야 한다.
         const val CHAT_REF_TYPE = "CHAT"
         const val STORY_REF_TYPE = "STORY"
 

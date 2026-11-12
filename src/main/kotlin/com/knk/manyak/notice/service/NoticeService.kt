@@ -1,7 +1,7 @@
 package com.knk.manyak.notice.service
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.notice.dto.*
 import com.knk.manyak.notice.entity.*
@@ -98,6 +98,13 @@ class NoticeService(
         notices.delete(row); notices.flush()
         audits.recordChange(actor, AdminAuditAction.NOTICE_DELETED, id.toString(), reason, before = before)
     }
+    /** 알림 회차가 발송 선점 때 읽는 공지의 공개 식별자, 게시 상태, 태그. 없으면 null. */
+    fun publicationOf(id: Long): NoticePublication? =
+        notices.findById(id).orElse(null)?.let { NoticePublication(it.publicId, it.status, it.tag) }
+
+    /** 캠페인의 공지 참조(FK)를 외부 식별자로 바꾼다. */
+    fun publicIdOf(id: Long): UUID? = notices.findPublicIdById(id)
+
     /** 캠페인 생성 트랜잭션이 공지 행 잠금을 소유하고 첫 연결 시각까지 함께 커밋한다. */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     fun connectNotification(id: UUID): NoticeNotificationLink? {

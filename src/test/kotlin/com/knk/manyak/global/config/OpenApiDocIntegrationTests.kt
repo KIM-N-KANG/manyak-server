@@ -1,9 +1,7 @@
 package com.knk.manyak.global.config
 
+import com.knk.manyak.support.IntegrationTest
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.junit.jupiter.api.Test
 import org.assertj.core.api.Assertions.assertThat
@@ -14,11 +12,7 @@ import org.assertj.core.api.Assertions.assertThat
  * - 인증 필수 엔드포인트(예: GET /users/me/credits)는 operation에 security(bearerAuth)를 갖는다.
  * - 공개 엔드포인트(예: GET /stories/{storyId})는 security가 없다(전역 requirement를 걸지 않았음).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class OpenApiDocIntegrationTests {
-
+class OpenApiDocIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
 

@@ -1,9 +1,9 @@
 package com.knk.manyak.push.service
 
 import com.google.firebase.messaging.AndroidConfig.Priority.HIGH
-import com.knk.manyak.auth.entity.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.credit.repository.CreditLotRepository
+import com.knk.manyak.auth.dto.UserStatus
+import com.knk.manyak.auth.service.AccountQueryService
+import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.push.inbox.ScheduledNotificationWriter
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
 import org.slf4j.LoggerFactory
@@ -20,8 +20,8 @@ data class CreditExpiryReminderResult(val targets: Int, val cooldown: Int, val s
 /** 만료 창의 회원을 조회하고 회차 커밋 뒤 알림 내역 기준의 쿨다운을 기록한다. */
 @Service
 class CreditExpiryReminderService(
-    private val lots: CreditLotRepository,
-    private val users: UserRepository,
+    private val wallet: CreditWalletService,
+    private val accounts: AccountQueryService,
     private val templates: PushMessageTemplateService,
     private val sender: FcmPushSender,
     private val redis: StringRedisTemplate,
@@ -38,7 +38,7 @@ class CreditExpiryReminderService(
         val now = clock.instant()
         val today = LocalDate.ofInstant(now, ZoneId.of("Asia/Seoul")).toString()
         val until = now.plus(Duration.ofHours(24))
-        val candidates = lots.findExpiryReminderTargets(now, until)
+        val candidates = wallet.expiryReminderTargets(now, until)
         // 조회 실패는 기록 전에 전파해 부분 요청이 남지 않게 한다.
         val cooling = candidates.filter { redis.hasKey(cooldownKey(it.userId)) }.map { it.userId }.toSet()
         val targets = candidates.filter { it.userId !in cooling }
@@ -53,7 +53,7 @@ class CreditExpiryReminderService(
             sent = round.recordedPushes
         } else {
             for (target in targets) {
-                val user = users.findById(target.userId).orElse(null)
+                val user = accounts.pushRecipientOf(target.userId)
                 val messageId = "credit-expiry:${user?.publicId}:$today"
                 val rejection = when {
                     user == null || user.status != UserStatus.ACTIVE -> "NOT_ACTIVE"

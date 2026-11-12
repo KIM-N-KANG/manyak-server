@@ -6,24 +6,21 @@ import com.knk.manyak.story.dto.UpdateStoryRequest
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.event.RecordApplicationEvents
 import org.springframework.test.context.event.ApplicationEvents
 import java.time.Duration
 import java.time.Instant
 
-@ActiveProfiles("test")
-@SpringBootTest
 @RecordApplicationEvents
-class SubmissionRetryIntegrationTests {
+class SubmissionRetryIntegrationTests : IntegrationTest() {
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var stories: StoryRepository
     @Autowired lateinit var rows: StorySubmissionRepository
@@ -33,7 +30,7 @@ class SubmissionRetryIntegrationTests {
     @Autowired lateinit var cleaner: DatabaseCleaner
     @Autowired lateinit var jdbc: JdbcTemplate
     @Autowired lateinit var events: ApplicationEvents
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     lateinit var notifier: SlackSubmissionHeldNotifier
     @Autowired lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
     private val lease = Duration.ofSeconds(300)

@@ -1,20 +1,19 @@
 package com.knk.manyak.credit.service
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.InsufficientCreditException
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.repository.CreditWalletRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -35,10 +34,7 @@ import java.time.temporal.ChronoUnit
  * 그래서 이 클래스는 cap 메커니즘 자체(구간 안 집계가 상한 미만일 때만 적립)만 검증하고, 창은 now를 확실히
  * 포함하거나(±1일) 확실히 제외하는(+1~+2일) 폭으로 잡아 경계 경합을 원천 제거한다.
  */
-@ActiveProfiles("test")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
-class CreditWalletServiceIntegrationTest {
-
+class CreditWalletServiceIntegrationTest : IntegrationTest() {
 
     @Autowired private lateinit var service: CreditWalletService
     @Autowired private lateinit var walletRepository: CreditWalletRepository
@@ -62,8 +58,8 @@ class CreditWalletServiceIntegrationTest {
             CreditDeduction(30, CreditReason.CHAT_IMAGE, "CHAT_IMAGE", 1),
         ))
         assertThat(result.balance).isEqualTo(50)
-        assertThat(result.transactions.map { it.amount }).containsExactly(-20L, -30L)
-        assertThat(result.transactions.map { it.refType }).containsExactly("CHAT", "CHAT_IMAGE")
+        assertThat(result.charges.map { it.amount }).containsExactly(-20L, -30L)
+        assertThat(result.charges.map { it.refType }).containsExactly("CHAT", "CHAT_IMAGE")
         assertThat(service.balanceOf(userId)).isEqualTo(50)
     }
 
@@ -80,7 +76,7 @@ class CreditWalletServiceIntegrationTest {
 
     @Test
     fun `빈 batch는 지갑이나 원장을 만들지 않는다`() {
-        assertThat(service.deductBatch(userId, emptyList()).transactions).isEmpty()
+        assertThat(service.deductBatch(userId, emptyList()).charges).isEmpty()
         assertThat(walletRepository.findByUserId(userId)).isNull()
         assertThat(transactionRepository.count()).isZero()
     }

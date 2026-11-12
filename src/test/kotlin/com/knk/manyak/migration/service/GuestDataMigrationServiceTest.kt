@@ -1,7 +1,7 @@
 package com.knk.manyak.migration.service
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
@@ -14,9 +14,9 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.entity.StoryCreationRequest
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
-import com.knk.manyak.story.entity.StoryCreationStage
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationStage
+import com.knk.manyak.story.dto.StoryVisibility
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
@@ -47,6 +47,15 @@ class GuestDataMigrationServiceTest {
     private val storyCreationSessionRepository: StoryCreationSessionRepository =
         mock(StoryCreationSessionRepository::class.java)
     private val userRepository: UserRepository = mock(UserRepository::class.java)
+    // 운영에서는 잠금 진입점이 잡은 회원의 잠금 모드가 PESSIMISTIC_WRITE다. 목에서는 그 상태를 그대로 답한다.
+    private val lockedEntityManager = mock(jakarta.persistence.EntityManager::class.java).also {
+        org.mockito.Mockito.`when`(it.getLockMode(org.mockito.ArgumentMatchers.any())).thenReturn(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    }
+    init {
+        // 잠근 회원은 운영에서 영속성 컨텍스트에서 다시 나온다. 목에서는 잠금 조회가 돌려준 회원을 findById도 돌려준다.
+        org.mockito.Mockito.doAnswer { java.util.Optional.ofNullable(userRepository.findByIdForUpdate(it.getArgument(0))) }
+            .`when`(userRepository).findById(org.mockito.ArgumentMatchers.anyLong())
+    }
     private val userStoryEndingReachRepository: com.knk.manyak.story.repository.UserStoryEndingReachRepository =
         mock(com.knk.manyak.story.repository.UserStoryEndingReachRepository::class.java)
     private val storyEndingRepository: com.knk.manyak.story.repository.StoryEndingRepository =
@@ -57,8 +66,12 @@ class GuestDataMigrationServiceTest {
     private val storyCreationRequestRepository = mock(StoryCreationRequestRepository::class.java)
     private val service =
         GuestDataMigrationService(
-            storyRepository, storyChatRepository, storyCreationSessionRepository, userRepository,
-            userStoryEndingReachRepository, storyEndingRepository, serverAnalytics, events, storyCreationRequestRepository,
+            // 스토리와 채팅의 클레임 진입점은 실제 구현을 저장소 목 위에 얹는다. 저장소 단위 스텁과 검증이 그대로 유효하다.
+            com.knk.manyak.story.service.GuestStoryClaims(storyRepository, storyCreationSessionRepository, storyCreationRequestRepository),
+            com.knk.manyak.chat.service.GuestChatClaims(storyChatRepository),
+            com.knk.manyak.auth.service.AccountLockService(userRepository, com.knk.manyak.auth.repository.AccountNoKeyUpdateLock { error("이 테스트는 이프 조정 잠금을 쓰지 않는다") }),
+            com.knk.manyak.auth.service.AccountQueryService(userRepository), com.knk.manyak.auth.service.AccountCommandService(userRepository, lockedEntityManager),
+            com.knk.manyak.story.service.EndingReachRecorder(userStoryEndingReachRepository, storyEndingRepository), serverAnalytics, events,
         )
 
     private val userId = 10L
@@ -88,7 +101,7 @@ class GuestDataMigrationServiceTest {
 
         assertThat(result.stories.single().status).isEqualTo(MigrationStatus.CONFLICT)
         verify(storyRepository, never()).claimByPublicId(story.publicId, userId)
-        verify(storyCreationSessionRepository, never()).claimByStoryId(anyLong(), anyLong())
+        verify(storyCreationSessionRepository, never()).claimByStoryIds(anyCollection(), anyLong())
         verifyNoInteractions(events)
     }
 
@@ -105,8 +118,8 @@ class GuestDataMigrationServiceTest {
 
     @Test
     fun `공개 범위와 무관하게 MIGRATED 스토리에만 재색인을 요청한다`() {
-        val public = Story(id = 71, userId = null, title = "공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC)
-        val private = Story(id = 72, userId = null, title = "비공개", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE)
+        val public = Story(id = 71, userId = null, title = "공개", visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC)
+        val private = Story(id = 72, userId = null, title = "비공개", visibility = com.knk.manyak.story.dto.StoryVisibility.PRIVATE)
         val mine = story(UUID.randomUUID(), userId)
         val other = story(UUID.randomUUID(), otherUserId)
         val missing = UUID.randomUUID()
@@ -129,8 +142,8 @@ class GuestDataMigrationServiceTest {
         assertThat(result.stories.map { it.status }).containsExactly(
             MigrationStatus.MIGRATED, MigrationStatus.MIGRATED, MigrationStatus.ALREADY_OWNED,
             MigrationStatus.CONFLICT, MigrationStatus.NOT_FOUND, MigrationStatus.ALREADY_OWNED)
-        verify(events).publishEvent(com.knk.manyak.search.event.StoryIndexRequestedEvent(71))
-        verify(events).publishEvent(com.knk.manyak.search.event.StoryIndexRequestedEvent(72))
+        verify(events).publishEvent(com.knk.manyak.story.event.StoryIndexRequestedEvent(71))
+        verify(events).publishEvent(com.knk.manyak.story.event.StoryIndexRequestedEvent(72))
         org.mockito.Mockito.verifyNoMoreInteractions(events)
         verify(storyCreationSessionRepository, times(1)).findAllByStoryIdIn(setOf(public.id, private.id))
         verify(storyCreationRequestRepository, times(1)).findAllByRequestIdIn(setOf(requestId))
@@ -268,7 +281,7 @@ class GuestDataMigrationServiceTest {
 
         service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
 
-        verify(storyCreationSessionRepository).claimByStoryId(77L, userId)
+        verify(storyCreationSessionRepository).claimByStoryIds(listOf(77L), userId)
     }
 
     @Test
@@ -278,7 +291,7 @@ class GuestDataMigrationServiceTest {
 
         service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
 
-        verify(storyCreationSessionRepository, never()).claimByStoryId(anyLong(), anyLong())
+        verify(storyCreationSessionRepository, never()).claimByStoryIds(anyCollection(), anyLong())
     }
 
     @Test

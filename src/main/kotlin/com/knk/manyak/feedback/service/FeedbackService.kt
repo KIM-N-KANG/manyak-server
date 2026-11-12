@@ -2,7 +2,7 @@ package com.knk.manyak.feedback.service
 
 import com.knk.manyak.feedback.dto.CreateFeedbackRequest
 import com.knk.manyak.feedback.entity.Feedback
-import com.knk.manyak.feedback.entity.Platform
+import com.knk.manyak.feedback.dto.Platform
 import com.knk.manyak.feedback.event.FeedbackCreatedEvent
 import com.knk.manyak.feedback.repository.FeedbackRepository
 import com.knk.manyak.global.observability.StructuredLogger

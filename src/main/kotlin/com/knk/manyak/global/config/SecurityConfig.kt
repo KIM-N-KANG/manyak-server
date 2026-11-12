@@ -1,8 +1,7 @@
 package com.knk.manyak.global.config
 
-import com.knk.manyak.user.consent.UserConsentService
-import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.RequestCorrelationFilter
+import com.knk.manyak.global.security.AccountAccessPort
 import com.knk.manyak.global.security.ApiAuthenticationEntryPoint
 import com.knk.manyak.global.security.InternalSecretAuthenticationFilter
 import com.knk.manyak.global.security.DeletedAccountRejectionFilter
@@ -32,39 +31,12 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 class SecurityConfig {
 
     @Bean
-    @org.springframework.core.annotation.Order(1)
-    fun adminSecurityFilterChain(
-        http: HttpSecurity,
-        tokens: com.knk.manyak.auth.jwt.JwtTokenProvider,
-        users: UserRepository,
-        eligibility: com.knk.manyak.admin.service.AdminEligibilityService,
-        mapper: ObjectMapper,
-        errors: com.knk.manyak.global.error.GlobalExceptionHandler,
-    ): SecurityFilterChain = http
-        .securityMatcher("/api/v1/admin/**")
-        .cors { }
-        .csrf { it.disable() }
-        .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
-        .authorizeHttpRequests {
-            it.requestMatchers(PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST,
-                com.knk.manyak.admin.security.AdminAuthenticationFilter.LOGIN_PATH)).permitAll()
-                .anyRequest().authenticated()
-        }
-        .exceptionHandling { it.authenticationEntryPoint(ApiAuthenticationEntryPoint(mapper)) }
-        .addFilterBefore(com.knk.manyak.admin.security.AdminAuthenticationFilter(
-            tokens.adminJwtDecoder(), users, eligibility, mapper, errors,
-        ), BearerTokenAuthenticationFilter::class.java)
-        .build()
-
-    @Bean
     fun securityFilterChain(
         http: HttpSecurity,
         jwtDecoder: JwtDecoder,
         environment: Environment,
-        userRepository: UserRepository,
+        accountAccess: AccountAccessPort,
         objectMapper: ObjectMapper,
-        consentService: UserConsentService,
-        @Value("\${manyak.auth.consent-gate.enabled:false}") consentGateEnabled: Boolean,
         @Value("\${manyak.internal.shared-secret:}") internalSharedSecret: String,
     ): SecurityFilterChain {
         val authenticationEntryPoint = ApiAuthenticationEntryPoint(objectMapper)
@@ -73,6 +45,11 @@ class SecurityConfig {
             .csrf { it.disable() }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .authorizeHttpRequests {
+                // 관리자 경로 이중 방어(KNK-2068). 관리자 경로는 admin 모듈의 관리자 체인(AdminSecurityConfig, @Order(1))이
+                // 먼저 잡으므로 정상 상태에서는 이 규칙에 도달하지 않는다. 관리자 체인이 등록되지 않거나 매처가 바뀌어
+                // 요청이 이 앱 체인으로 떨어지면, 일반 회원 토큰이 아래 anyRequest().authenticated()로 관리자 API를
+                // 통과하게 된다. 그 경우에도 전부 막도록 다른 어떤 규칙보다 먼저 거부한다.
+                it.requestMatchers("/api/v1/admin/**").denyAll()
                 // /actuator/prometheus 무인증 허용은 local 프로파일로만 한정한다(스펙 §4-7).
                 // 아래 전역 permitAll 목록에 넣으면 안 된다: 지금은 운영 exposure(health,info)에 없어 뚫리지 않을 뿐,
                 // 나중에 누가 exposure에 prometheus 한 줄을 더하는 순간 인증 없이 내부 지표가 공개된다.
@@ -171,7 +148,7 @@ class SecurityConfig {
             // 탈퇴(DELETED) 계정의 잔여 access 토큰 전면 거부(KNK-1019). optional 필터·RS 필터 둘 다의
             // 인증 확정 이후에 놓아, 엔드포인트가 principal을 읽는 방식과 무관하게 같은 계약을 보장한다.
             .addFilterAfter(
-                DeletedAccountRejectionFilter(userRepository, objectMapper, consentService, consentGateEnabled),
+                DeletedAccountRejectionFilter(accountAccess, objectMapper),
                 BearerTokenAuthenticationFilter::class.java,
             )
             // Bearer access 토큰(HS256 JWT) 검증은 리소스 서버가 JwtDecoder 빈(AuthConfig)으로 수행한다.

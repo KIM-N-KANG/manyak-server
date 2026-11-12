@@ -1,6 +1,7 @@
 package com.knk.manyak.migration.controller
 
 import com.knk.manyak.global.security.CurrentUserId
+import com.knk.manyak.global.security.requireUser
 import com.knk.manyak.global.observability.DeviceIdHasher
 import com.knk.manyak.global.observability.RequestCorrelationFilter
 import com.knk.manyak.migration.dto.MigrationRequest
@@ -14,13 +15,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
-import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.server.ResponseStatusException
 
 @Tag(name = "Auth", description = "인증 API")
 @SecurityRequirement(name = "bearerAuth") // 게스트 데이터 마이그레이션은 인증 필수(스킴은 OpenApiConfig.SECURITY_SCHEME_NAME).
@@ -65,8 +64,7 @@ class MigrationController(
     ): MigrationResponse {
         // /auth/migrate는 인증 필수 경로(anyRequest().authenticated())라 미인증은 필터에서 401이 된다.
         // userId가 null인 경우는 토큰은 유효하나 그 사용자가 사라진 상태이므로 401로 처리한다(/me와 동일).
-        val ownerId = userId
-            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
+        val ownerId = requireUser(userId)
         val deviceIdHash = deviceId?.takeIf { it.isNotBlank() }?.let(deviceIdHasher::hash)
         return guestDataMigrationService.migrate(ownerId, request, deviceIdHash)
     }

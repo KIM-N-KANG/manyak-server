@@ -4,21 +4,18 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.http.HttpMethod
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatModelPromotionIntegrationTests {
+class ChatModelPromotionIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
@@ -26,8 +23,8 @@ class ChatModelPromotionIntegrationTests {
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var models: com.knk.manyak.chat.repository.ChatModelRepository
     @Autowired private lateinit var trials: com.knk.manyak.credit.service.GuestTrialLimitService
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
-    private lateinit var audits: com.knk.manyak.admin.repository.AdminAuditLogRepository
+    @Autowired
+    private lateinit var audits: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
     private lateinit var token: String
     private lateinit var memberToken: String
     private lateinit var member: User
@@ -99,13 +96,13 @@ class ChatModelPromotionIntegrationTests {
 
     @Test fun `감사 기록 실패는 프로모션 덮어쓰기와 해제를 함께 롤백한다`() {
         put().expectStatus().isOk
-        val existing = com.knk.manyak.admin.entity.AdminAuditLog(
-            adminUserId = member.id, category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-            action = com.knk.manyak.admin.entity.AdminAuditAction.CHAT_MODEL_PROMOTION_UPSERTED,
-            targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.CHAT_MODEL,
+        val existing = com.knk.manyak.adminkit.audit.AdminAuditLog(
+            adminUserId = member.id, category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+            action = com.knk.manyak.adminkit.audit.AdminAuditAction.CHAT_MODEL_PROMOTION_UPSERTED,
+            targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.CHAT_MODEL,
             targetId = "LITE", requestId = "matcher")
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("injected audit failure"))
-            .`when`(audits).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java) ?: existing)
+            .`when`(audits).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java) ?: existing)
         put(data = body(10)).expectStatus().is5xxServerError
         delete().expectStatus().is5xxServerError
         assertThat(models.findById("LITE").orElseThrow().promoTurnCost).isZero()

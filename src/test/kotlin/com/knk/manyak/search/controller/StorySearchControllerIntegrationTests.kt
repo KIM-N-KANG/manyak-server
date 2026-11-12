@@ -3,11 +3,11 @@ package com.knk.manyak.search.controller
 import com.knk.manyak.search.dto.StorySearchAuthor
 import com.knk.manyak.search.dto.StorySearchCursor
 import com.knk.manyak.search.dto.StorySearchDocument
-import com.knk.manyak.search.event.StoryIndexRequestedEvent
+import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import com.knk.manyak.search.service.StorySearchDocumentReader
 import com.knk.manyak.search.service.StorySearchIndexer
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.dto.*
 import com.knk.manyak.story.entity.*
@@ -16,9 +16,12 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.GeneralStoryCreationService
 import com.knk.manyak.story.service.StoryEditService
 import com.knk.manyak.story.service.StoryService
+import com.knk.manyak.support.AlternateConfigIntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
-import com.knk.manyak.user.dto.UpdateProfileRequest
-import com.knk.manyak.user.service.UserProfileService
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
+import com.knk.manyak.auth.dto.UpdateProfileRequest
+import com.knk.manyak.auth.service.UserProfileService
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -30,25 +33,17 @@ import org.opensearch.client.opensearch.core.SearchRequest
 import org.opensearch.client.opensearch.core.SearchResponse
 import org.opensearch.client.opensearch.core.search.Hit
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.ApplicationEventPublisher
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import java.util.UUID
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.ai.story.stub=true", "manyak.official-user-public-id=11111111-2222-3333-4444-555555555555"])
-class StorySearchControllerIntegrationTests {
+class StorySearchControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var stories: StoryRepository
-    @MockitoSpyBean private lateinit var users: UserRepository
+    @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var sessions: com.knk.manyak.story.repository.StoryCreationSessionRepository
     @Autowired private lateinit var storylines: com.knk.manyak.story.repository.StoryCreationStorylineRepository
     @Autowired private lateinit var jwt: com.knk.manyak.auth.jwt.JwtTokenProvider
@@ -62,8 +57,8 @@ class StorySearchControllerIntegrationTests {
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var transactions: PlatformTransactionManager
     @Autowired private lateinit var events: ApplicationEventPublisher
-    @MockitoBean private lateinit var openSearch: OpenSearchClient
-    @MockitoBean private lateinit var indexer: StorySearchIndexer
+    @Autowired private lateinit var openSearch: OpenSearchClient
+    @Autowired private lateinit var indexer: StorySearchIndexer
 
     @BeforeEach
     fun setUp() {
@@ -170,7 +165,7 @@ class StorySearchControllerIntegrationTests {
 
     @Test
     fun `검색 카드의 오리지널 판정은 색인 작성자 ID 없이도 현재 소유자를 따른다`() {
-        val officialId = UUID.fromString("11111111-2222-3333-4444-555555555555")
+        val officialId = UUID.fromString(IntegrationTest.OFFICIAL_USER_PUBLIC_ID)
         val official = users.save(User(publicId = officialId, nickname = "마냑"))
         val member = users.save(User(nickname = "일반작가"))
         val original = stories.save(Story(userId = official.id, title = "공식 왕국"))
@@ -367,8 +362,12 @@ class StorySearchControllerIntegrationTests {
         assertEquals(0L, reader.read(story.id)!!.likeCount)
         val other = stories.save(Story(userId = user.id, title = "다른 스토리"))
         profiles.updateProfile(user.id, UpdateProfileRequest(nickname = "새검색작가"))
-        verify(indexer, timeout(3000)).index(story.id)
-        verify(indexer, timeout(3000)).index(other.id)
+        // 닉네임 변경은 소유 스토리를 묶음 색인 요청 하나로 보낸다(STORY 결정 27).
+        verify(indexer, timeout(3000)).indexAll(anyList())
+        @Suppress("UNCHECKED_CAST")
+        val requested = mockingDetails(indexer).invocations.single { it.method.name == "indexAll" }.arguments[0] as List<Long>
+        assertEquals(setOf(story.id, other.id), requested.toSet())
+        assertEquals(2, requested.size)
         clearInvocations(indexer)
         assertEquals("새검색작가", reader.read(story.id)!!.author!!.nickname)
         edit.updateStory(created.id, user.id, UpdateStoryRequest(visibility = StoryVisibility.PRIVATE))
@@ -452,6 +451,37 @@ class StorySearchControllerIntegrationTests {
             .jsonPath("$.paths['/api/v1/stories/search'].get.parameters[?(@.name == 'q')].required").isEqualTo(listOf(true))
     }
 
+    /** 검색 엔드포인트가 어느 컨트롤러에 있든 OpenAPI 계약은 같아야 한다(KNK-2062). 태그, operationId, 파라미터, 응답 스키마를 고정한다. */
+    @Test
+    fun `검색 OpenAPI는 Stories 태그와 operationId searchStories 파라미터 응답 스키마를 유지한다`() {
+        val get = "$.paths['/api/v1/stories/search'].get"
+        client.get().uri("/v3/api-docs").exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$get.tags").isEqualTo(listOf("Stories"))
+            .jsonPath("$.tags[?(@.name == 'Stories')].description").isEqualTo(listOf("스토리 API"))
+            .jsonPath("$get.operationId").isEqualTo("searchStories")
+            .jsonPath("$get.summary").isEqualTo("공개 스토리 검색")
+            .jsonPath("$get.description").isEqualTo("검색어는 trim 후 2~100자이며 관련도순으로 반환합니다. 다음 페이지는 같은 q와 nextCursor를 사용합니다.")
+            .jsonPath("$get.parameters.length()").isEqualTo(3)
+            .jsonPath("$get.parameters[0].name").isEqualTo("q")
+            .jsonPath("$get.parameters[0].in").isEqualTo("query")
+            .jsonPath("$get.parameters[0].description").isEqualTo("검색어(trim 후 2~100자)")
+            .jsonPath("$get.parameters[0].required").isEqualTo(true)
+            .jsonPath("$get.parameters[0].schema.type").isEqualTo("string")
+            .jsonPath("$get.parameters[1].name").isEqualTo("limit")
+            .jsonPath("$get.parameters[1].required").isEqualTo(false)
+            .jsonPath("$get.parameters[1].schema.type").isEqualTo("integer")
+            .jsonPath("$get.parameters[1].schema.default").isEqualTo(20)
+            .jsonPath("$get.parameters[2].name").isEqualTo("cursor")
+            .jsonPath("$get.parameters[2].required").isEqualTo(false)
+            .jsonPath("$get.parameters[2].schema.type").isEqualTo("string")
+            .jsonPath("$get.responses['200'].description").isEqualTo("검색 성공")
+            .jsonPath("$get.responses['200'].content['*/*'].schema['\$ref']").isEqualTo("#/components/schemas/StoryPageResponse")
+            .jsonPath("$get.responses['400'].description").isEqualTo("검색어·커서 형식 오류")
+            .jsonPath("$get.responses['400'].content").doesNotExist()
+            .jsonPath("$get.responses['503'].description").isEqualTo("검색 미설정 또는 일시적 장애")
+            .jsonPath("$get.responses['503'].content").doesNotExist()
+    }
+
     private fun indexed(id: Long) {
         verify(indexer, timeout(3000)).index(id)
         clearInvocations(indexer)
@@ -466,19 +496,13 @@ class StorySearchControllerIntegrationTests {
             .shards { it.total(1).successful(1).failed(0) }.hits { it.hits(hits) }.build()
 }
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(
-    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.official-user-public-id="],
-)
-class StorySearchOriginalUnconfiguredIntegrationTests {
+class StorySearchOriginalUnconfiguredIntegrationTests : AlternateConfigIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var cleaner: DatabaseCleaner
-    @MockitoBean private lateinit var openSearch: OpenSearchClient
-    @MockitoBean private lateinit var indexer: StorySearchIndexer
+    @Autowired private lateinit var openSearch: OpenSearchClient
+    @Autowired private lateinit var indexer: StorySearchIndexer
 
     @Test
     fun `공식 계정 설정이 비면 검색 카드의 isOriginal은 false다`() {

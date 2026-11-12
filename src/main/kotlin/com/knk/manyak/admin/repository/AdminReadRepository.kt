@@ -1,8 +1,15 @@
 package com.knk.manyak.admin.repository
 
 import com.knk.manyak.admin.dto.*
-import com.knk.manyak.auth.entity.UserStatus
-import com.knk.manyak.credit.entity.CreditOrderStatus
+import com.knk.manyak.adminkit.query.AdminPageResponse
+import com.knk.manyak.adminkit.query.AdminPagination
+import com.knk.manyak.adminkit.query.AdminQuery
+import com.knk.manyak.adminkit.query.adminPage
+import com.knk.manyak.adminkit.query.instant
+import com.knk.manyak.adminkit.query.longOrNull
+import com.knk.manyak.auth.dto.MEMBER_COLUMNS
+import com.knk.manyak.auth.dto.memberSummary
+import com.knk.manyak.credit.dto.CreditOrderStatus
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Repository
@@ -13,11 +20,6 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 
-internal const val MEMBER_COLUMNS = """u.public_id AS member_id, u.nickname, u.status AS member_status, u.created_at AS member_created_at,
-    CASE WHEN a.user_id IS NULL THEN FALSE ELSE TRUE END AS is_admin"""
-internal fun memberSummary(rs: ResultSet): AdminMemberSummary? = rs.getObject("member_id", UUID::class.java)?.let {
-    AdminMemberSummary(it, rs.getString("nickname"), UserStatus.valueOf(rs.getString("member_status")), rs.getBoolean("is_admin"), rs.instant("member_created_at")!!)
-}
 @Repository
 class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private val mapper: ObjectMapper) {
     private val chats = "(SELECT COUNT(*) FROM story_chats c WHERE c.user_id=u.id AND c.deleted_at IS NULL)"
@@ -43,7 +45,7 @@ class AdminReadRepository(private val jdbc: NamedParameterJdbcTemplate, private 
             val uuid = runCatching { UUID.fromString(search) }.getOrNull()?.takeIf { it.toString() == search }
             if (uuid != null) q.equal("u.public_id", uuid) else {
                 q.params["search"] = search
-                q.params["nickname"] = com.knk.manyak.user.service.nicknameKeyOf(search)
+                q.params["nickname"] = com.knk.manyak.auth.service.nicknameKeyOf(search)
                 q.add("""((u.status <> 'DELETED' AND POSITION(:nickname IN REGEXP_REPLACE(LOWER(u.nickname), '\s+', '', 'g')) > 0)
                     OR EXISTS (SELECT 1 FROM social_accounts sa WHERE sa.user_id=u.id AND sa.deleted_at IS NULL AND LOWER(sa.email)=:search))""")
             }

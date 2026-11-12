@@ -1,8 +1,9 @@
 package com.knk.manyak.story.service
 
-import com.knk.manyak.search.event.StoryIndexRequestedEvent
+import com.knk.manyak.global.util.parsePublicIdOrNull
+import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import org.springframework.context.ApplicationEventPublisher
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.auth.security.SuspensionGuard
 import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.image.service.UploadedImageKind
 import com.knk.manyak.image.service.UploadedImageObjectKeys
@@ -113,7 +114,7 @@ class StoryImageService(
             throw ResponseStatusException(HttpStatus.CONFLICT, "검수 중에는 이미지를 삭제할 수 없습니다.")
         }
         val character = storyImageAccess.resolveCharacter(story, characterId)
-        val imagePublicId = StoryImageAccess.parsePublicIdOrNull(imageId) ?: return
+        val imagePublicId = parsePublicIdOrNull(imageId) ?: return
         storyCharacterImageRepository.findByCharacterIdAndPublicId(character.id, imagePublicId)
             ?.let(storyCharacterImageRepository::delete)
         storyCharacterImageRepository.flush()

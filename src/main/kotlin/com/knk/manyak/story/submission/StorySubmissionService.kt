@@ -1,13 +1,13 @@
 package com.knk.manyak.story.submission
 
-import com.knk.manyak.auth.entity.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.dto.UserStatus
+import com.knk.manyak.auth.service.AccountLockService
 import com.knk.manyak.story.dto.*
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.GenreInputValidator
 import com.knk.manyak.story.service.StoryEditService
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.auth.security.SuspensionGuard
 import org.springframework.data.domain.PageRequest
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -21,13 +21,13 @@ import java.util.UUID
 class StorySubmissionService(
     private val submissions: StorySubmissionRepository,
     private val stories: StoryRepository,
-    private val users: UserRepository,
+    private val locks: AccountLockService,
     private val forms: SubmissionFormAssembler,
     private val edit: StoryEditService,
     private val mapper: ObjectMapper,
     private val suspension: SuspensionGuard,
     private val genres: GenreInputValidator,
-    private val drafts: com.knk.manyak.user.draft.StoryDraftRepository,
+    private val drafts: com.knk.manyak.story.draft.StoryDraftRepository,
 ) {
     @Transactional
     fun create(request: CreateGeneralStoryRequest, userId: Long): SubmissionAccepted {
@@ -46,7 +46,7 @@ class StorySubmissionService(
         val story = ownedStory(storyId, userId, true)
         requireNoPending(story.id)
         if (request.visibility != null && request.copy(visibility = null) == UpdateStoryRequest() &&
-            !(story.takenDownAt != null && request.visibility == com.knk.manyak.story.entity.StoryVisibility.PUBLIC)) {
+            !(story.takenDownAt != null && request.visibility == com.knk.manyak.story.dto.StoryVisibility.PUBLIC)) {
             edit.updateStory(storyId, userId, request)
             return editForm(storyId, userId)
         }
@@ -137,7 +137,7 @@ class StorySubmissionService(
     }
 
     private fun requireMember(userId: Long) {
-        val user = users.findByIdForUpdate(userId) ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED)
+        val user = locks.lock(userId) ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED)
         if (user.status == UserStatus.DELETED) throw ResponseStatusException(HttpStatus.UNAUTHORIZED)
         suspension.requireActive(userId)
     }

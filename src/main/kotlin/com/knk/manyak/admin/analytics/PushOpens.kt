@@ -1,6 +1,6 @@
 package com.knk.manyak.admin.analytics
 
-import com.knk.manyak.admin.dto.AdminDateRange
+import com.knk.manyak.adminkit.query.AdminDateRange
 import com.knk.manyak.push.dto.PushKind
 import com.knk.manyak.push.dto.PushDeliveryType
 import com.knk.manyak.push.dto.PushCampaignReach

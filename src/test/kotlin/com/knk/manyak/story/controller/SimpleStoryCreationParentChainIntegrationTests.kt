@@ -1,7 +1,7 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.AiTraceLink
@@ -17,27 +17,21 @@ import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.CreateSimpleStoryRequest
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
-import com.knk.manyak.story.entity.ParentLinkError
+import com.knk.manyak.story.dto.ParentLinkError
 import com.knk.manyak.story.entity.StoryCreationRequest
-import com.knk.manyak.story.entity.StoryCreationStage
+import com.knk.manyak.story.dto.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationTag
-import com.knk.manyak.story.entity.StoryCreationTagSource
+import com.knk.manyak.story.dto.StoryCreationTagSource
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationTagRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Import
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
@@ -83,26 +77,18 @@ class ParentChainCapturingStoryAiClient : StoryAiClient {
  * 중첩이 아니라 **최상위** 설정이다(SpringContextBudgetGuardTests): 중첩 @TestConfiguration은 클래스마다 컨텍스트를
  * 하나씩 늘려 캐시 축출을 부르므로, 여러 클래스가 @Import로 공유할 수 있는 최상위 설정으로 둔다.
  */
-@TestConfiguration
 class ParentChainCapturingAiClientConfig {
-    @Bean
-    @Primary
     fun parentChainCapturingStoryAiClient(): ParentChainCapturingStoryAiClient = ParentChainCapturingStoryAiClient()
 }
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(ParentChainCapturingAiClientConfig::class)
-@TestPropertySource(
-    properties = [
-        "spring.datasource.url=jdbc:h2:mem:manyak-parent-chain;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-    ],
-)
-class SimpleStoryCreationParentChainIntegrationTests {
+class SimpleStoryCreationParentChainIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.story = scriptedParentChainCapturingAiClientConfigParentChainCapturingStoryAiClient
+    }
+
 
     @Autowired private lateinit var restTestClient: RestTestClient
-    @Autowired private lateinit var storyAiClient: ParentChainCapturingStoryAiClient
+    private val storyAiClient = scriptedParentChainCapturingAiClientConfigParentChainCapturingStoryAiClient
     @Autowired private lateinit var tagRepository: StoryCreationTagRepository
     @Autowired private lateinit var creationRequestRepository: StoryCreationRequestRepository
     @Autowired private lateinit var userRepository: UserRepository
@@ -349,3 +335,5 @@ class SimpleStoryCreationParentChainIntegrationTests {
         return requestId
     }
 }
+
+private val scriptedParentChainCapturingAiClientConfigParentChainCapturingStoryAiClient = ParentChainCapturingAiClientConfig().parentChainCapturingStoryAiClient()

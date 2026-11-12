@@ -1,9 +1,9 @@
 package com.knk.manyak.story.dto
 
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.knk.manyak.story.entity.StoryCreationRequestStatus
-import com.knk.manyak.story.entity.StoryCreationStage
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationStage
+import com.knk.manyak.story.dto.StoryVisibility
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.Valid

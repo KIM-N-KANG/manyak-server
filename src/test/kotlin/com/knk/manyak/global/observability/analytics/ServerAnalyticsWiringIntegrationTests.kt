@@ -1,9 +1,10 @@
 package com.knk.manyak.global.observability.analytics
 
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.user.service.UserWithdrawalService
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.auth.service.UserWithdrawalService
 import com.knk.manyak.invite.service.InviteService
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import org.springframework.transaction.PlatformTransactionManager
@@ -11,13 +12,8 @@ import org.springframework.transaction.support.TransactionTemplate
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditPolicyKey
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import com.knk.manyak.auth.entity.SocialProvider
-import com.knk.manyak.auth.social.SocialIdTokenVerifier
-import com.knk.manyak.auth.social.SocialUserInfo
-import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
-import com.knk.manyak.auth.token.RefreshTokenStore
 import com.knk.manyak.support.DatabaseCleaner
 import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.migration.service.GuestDataMigrationService
@@ -30,15 +26,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
@@ -50,10 +41,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  *
  * 피드백·로그인은 요청 스레드에서 동기 발행되므로 exchange() 직후 캡처를 단언할 수 있다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ServerAnalyticsWiringIntegrationTests {
+class ServerAnalyticsWiringIntegrationTests : IntegrationTest() {
 
     class CapturingPublisher : AnalyticsEventPublisher {
         val events = CopyOnWriteArrayList<AnalyticsEvent>()
@@ -62,30 +50,6 @@ class ServerAnalyticsWiringIntegrationTests {
         }
 
         fun ofType(eventType: String) = events.filter { it.eventType == eventType }
-    }
-
-    @TestConfiguration
-    class CapturingConfig {
-        @Bean
-        @Primary
-        fun capturingPublisher(): CapturingPublisher = CapturingPublisher()
-
-        @Bean
-        @Primary
-        fun fakeSocialIdTokenVerifiers(): Map<SocialProvider, SocialIdTokenVerifier> {
-            val verifier = SocialIdTokenVerifier { idToken ->
-                if (idToken == "invalid") {
-                    throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 ID 토큰입니다.")
-                }
-                // 실제 검증기는 항상 iat를 채운다. 계정 연동 재인증이 신선도를 fail-closed로 보므로 여기서도 채운다.
-                SocialUserInfo(providerUserId = idToken, issuedAt = Instant.now())
-            }
-            return mapOf(SocialProvider.GOOGLE to verifier, SocialProvider.KAKAO to verifier)
-        }
-
-        @Bean
-        @Primary
-        fun inMemoryRefreshTokenStore(): RefreshTokenStore = InMemoryRefreshTokenStore()
     }
 
     @Autowired private lateinit var restTestClient: RestTestClient
@@ -409,7 +373,7 @@ class ServerAnalyticsWiringIntegrationTests {
     fun `이관 부분 성공은 중복과 누락을 포함한 제출 총수를 집계하고 커밋 후 한 번 발행한다`() {
         val user = member()
         val other = member()
-        fun story(owner: Long? = null) = stories.save(Story(userId = owner, title = "이관 이벤트 검증", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
+        fun story(owner: Long? = null) = stories.save(Story(userId = owner, title = "이관 이벤트 검증", visibility = com.knk.manyak.story.dto.StoryVisibility.PRIVATE))
         val guestStory = story()
         val ownedStory = story(user.id)
         val conflictStory = story(other.id)
@@ -461,7 +425,7 @@ class ServerAnalyticsWiringIntegrationTests {
     @Test
     fun `이관 UUID 형식 오류는 validation 실패만 발행하고 앞선 클레임도 롤백한다`() {
         val user = member()
-        val guestStory = stories.save(Story(title = "형식 오류 롤백 검증", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
+        val guestStory = stories.save(Story(title = "형식 오류 롤백 검증", visibility = com.knk.manyak.story.dto.StoryVisibility.PRIVATE))
         assertThatThrownBy {
             migrations.migrate(user.id, MigrationRequest(
                 storyIds = listOf(guestStory.publicId.toString()), chatIds = listOf("invalid-uuid"),
@@ -481,7 +445,7 @@ class ServerAnalyticsWiringIntegrationTests {
     @Test
     fun `이관 성공 결과도 트랜잭션 롤백 시 이벤트와 소유권을 남기지 않는다`() {
         val user = member()
-        val guestStory = stories.save(Story(title = "이관 롤백 검증", visibility = com.knk.manyak.story.entity.StoryVisibility.PRIVATE))
+        val guestStory = stories.save(Story(title = "이관 롤백 검증", visibility = com.knk.manyak.story.dto.StoryVisibility.PRIVATE))
         val guestChat = chats.save(StoryChat(storyId = guestStory.id))
         TransactionTemplate(transactions).executeWithoutResult {
             migrations.migrate(user.id, MigrationRequest(

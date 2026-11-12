@@ -1,5 +1,6 @@
 package com.knk.manyak.push.outbox
 
+import com.knk.manyak.support.SharedPostgres
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.event.StoryCompletedEvent
@@ -15,12 +16,9 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.core.env.MapPropertySource
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
 import org.springframework.transaction.annotation.EnableTransactionManagement
 import org.springframework.transaction.support.TransactionTemplate
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.kafka.KafkaContainer
 import tools.jackson.module.kotlin.jacksonObjectMapper
 import java.time.*
@@ -31,9 +29,6 @@ import java.util.concurrent.*
 /** 테스트 전용 컨테이너만 사용한다. 앱의 datasource/Flyway 프로파일 격리는 변경하지 않는다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PushOutboxPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "outbox-test")
-        .withEnv("POSTGRES_DB", "outbox").withExposedPorts(5432)
-        .waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private val now = Instant.parse("2026-09-25T00:00:00Z")
     private val mapper = jacksonObjectMapper()
     private lateinit var jdbc: JdbcTemplate
@@ -44,8 +39,7 @@ class PushOutboxPostgresTests {
     private val event = StoryCompletedEvent(7, UUID.randomUUID(), UUID.randomUUID().toString(), "완성 제목")
 
     @BeforeAll fun start() {
-        pg.start()
-        val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/outbox", "postgres", "outbox-test")
+        val ds = SharedPostgres.database()
         jdbc = JdbcTemplate(ds)
         val migration = java.io.File("src/main/resources/db/migration/V86__create_push_outbox.sql").readText()
         jdbc.execute(migration)
@@ -59,13 +53,20 @@ class PushOutboxPostgresTests {
         context.registerBean(tools.jackson.databind.ObjectMapper::class.java, Supplier { mapper })
         context.registerBean(Clock::class.java, Supplier { Clock.fixed(now, ZoneOffset.UTC) })
         context.registerBean(UserRepository::class.java, Supplier {
-            mock(UserRepository::class.java).also { `when`(it.findById(7)).thenReturn(Optional.of(user)) }
+            mock(UserRepository::class.java).also {
+                `when`(it.findById(7)).thenReturn(Optional.of(user))
+                val repository = it
+                // 묶음 변환은 테스트가 findById로 등록한 회원만 찾는다.
+                doAnswer { call -> call.getArgument<Collection<Long>>(0).mapNotNull { id -> repository.findById(id).orElse(null)?.let { found -> publicIdRow(id, found.publicId) } } }
+                    .`when`(it).findPublicIdsByIdIn(anyCollection())
+            }
         })
-        context.register(PushOutboxStore::class.java, StoryCompletionOutboxListener::class.java, ScheduledPushOutboxWriter::class.java)
+        context.register(PushOutboxStore::class.java, StoryCompletionOutboxListener::class.java, ScheduledPushOutboxWriter::class.java,
+            com.knk.manyak.auth.service.AccountQueryService::class.java)
         context.refresh()
         store = context.getBean(PushOutboxStore::class.java)
     }
-    @AfterAll fun stop() { if (::context.isInitialized) context.close(); pg.stop() }
+    @AfterAll fun stop() { if (::context.isInitialized) context.close() }
     @BeforeEach fun clean() { jdbc.update("DELETE FROM push_outbox"); MDC.clear() }
     @AfterEach fun clearMdc() { MDC.clear() }
     private fun record() { tx.executeWithoutResult { context.publishEvent(event) } }
@@ -100,7 +101,29 @@ class PushOutboxPostgresTests {
         val writer = context.getBean(ScheduledPushOutboxWriter::class.java)
         val data = mapOf("type" to "PROMOTION")
         val campaignId = UUID.randomUUID().toString()
-        // 첫 회원 요청은 삽입되지만 두 번째 회원 조회가 실패한다.
+        // 첫 요청을 실제로 삽입한 뒤 두 번째 삽입이 실패한다. 회차 트랜잭션이 앞선 요청까지 되돌린다.
+        val failing = spy(PushOutboxStore(jdbc, mapper))
+        var inserts = 0
+        doAnswer { call ->
+            if (++inserts == 2) {
+                assertThat(count()).isEqualTo(1)
+                error("second insert failed")
+            }
+            call.callRealMethod()
+        }.`when`(failing).insert(any(PushMessage::class.java) ?: PushMessage("", "", data = emptyMap(), requestId = "", sessionId = ""),
+            any(Instant::class.java) ?: Instant.EPOCH)
+        // 작성기 프록시의 트랜잭션 경계를 그대로 쓰려고 대상 객체의 저장소만 잠시 바꾼다.
+        val target = org.springframework.test.util.AopTestUtils.getTargetObject<ScheduledPushOutboxWriter>(writer)
+        org.springframework.test.util.ReflectionTestUtils.setField(target, "store", failing)
+        try {
+            assertThatThrownBy { writer.record(listOf(7, 7), data, "promotion", campaignId) }
+                .isInstanceOf(IllegalStateException::class.java).hasMessage("second insert failed")
+        } finally {
+            org.springframework.test.util.ReflectionTestUtils.setField(target, "store", store)
+        }
+        assertThat(inserts).isEqualTo(2)
+        assertThat(count()).isZero()
+        // 대상 회원이 없으면 기록 전에 같은 예외로 실패하고 아무것도 남지 않는다.
         assertThatThrownBy { writer.record(listOf(7, 999), data, "promotion", campaignId) }
             .isInstanceOf(NoSuchElementException::class.java)
         assertThat(count()).isZero()
@@ -203,6 +226,11 @@ class PushOutboxPostgresTests {
             }
             factory.destroy()
         }
+    }
+
+    private fun publicIdRow(id: Long, publicId: java.util.UUID) = object : com.knk.manyak.auth.repository.UserPublicIdRow {
+        override val id = id
+        override val publicId = publicId
     }
 }
 

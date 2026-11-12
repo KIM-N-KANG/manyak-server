@@ -4,13 +4,14 @@ import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.loopbackUrl
+import com.knk.manyak.support.startOnLoopback
 import okhttp3.mockwebserver.*
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.*
 import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.context.annotation.Import
@@ -22,18 +23,18 @@ import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.time.*
 
-@AutoConfigureRestTestClient
 @Import(AdminMetricsTestClock::class)
 @ExtendWith(OutputCaptureExtension::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminAiCostIntegrationTests {
+class AdminAiCostIntegrationTests : IntegrationTest() {
     companion object {
-        private val server = MockWebServer().apply { start() }
+        private val server = MockWebServer().startOnLoopback()
         @JvmStatic @DynamicPropertySource fun properties(r: DynamicPropertyRegistry) {
-            r.add("manyak.admin.langfuse.host") { server.url("/").toString() }
+            r.add("manyak.admin.langfuse.host") { server.loopbackUrl("/") }
             r.add("manyak.admin.langfuse.public-key") { "cost-public-key" }
             r.add("manyak.admin.langfuse.secret-key") { "cost-secret-key" }
             r.add("manyak.admin.langfuse.environment") { "prod" }
+            // 운영 기본 1초 호출 간격은 호출 수만큼 실대기가 된다. 간격 보장 자체는 LangfuseCostSnapshotsTests가 검증한다(KNK-2058).
+            r.add("manyak.admin.langfuse.call-interval") { "10ms" }
         }
         @JvmStatic @AfterAll fun stop() { server.shutdown() }
     }

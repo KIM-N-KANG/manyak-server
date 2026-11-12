@@ -1,8 +1,9 @@
 package com.knk.manyak.credit.service
 
-import com.knk.manyak.admin.repository.AdminAuditLogRepository
-import com.knk.manyak.admin.repository.AdminChangeActorRepository
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.support.SharedPostgres
+import com.knk.manyak.adminkit.audit.AdminAuditLogRepository
+import com.knk.manyak.adminkit.audit.AdminChangeActorRepository
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.dto.*
@@ -10,14 +11,12 @@ import com.knk.manyak.credit.repository.*
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.*
 import org.slf4j.MDC
 import org.springframework.context.annotation.AnnotationConfigApplicationContext
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.orm.jpa.JpaTransactionManager
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean
 import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter
@@ -25,8 +24,6 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.annotation.EnableTransactionManagement
 import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.server.ResponseStatusException
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import tools.jackson.module.kotlin.jacksonObjectMapper
 import java.time.Instant
 import java.util.concurrent.Callable
@@ -44,9 +41,6 @@ class AdminCreditPostgresConfig
 /** 전용 PostgreSQL에만 연결하는 작은 Spring/JPA 컨텍스트. 앱 테스트의 H2/Flyway 격리 장치는 바꾸지 않는다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AdminCreditPostgresConcurrencyTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "credit-lock-test")
-        .withEnv("POSTGRES_DB", "credit_lock_test").withExposedPorts(5432)
-        .waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var context: AnnotationConfigApplicationContext
     private lateinit var jdbc: JdbcTemplate
     private lateinit var tx: TransactionTemplate
@@ -58,9 +52,7 @@ class AdminCreditPostgresConcurrencyTests {
     private val mapper = jacksonObjectMapper()
 
     @BeforeAll fun start() {
-        pg.start()
-        val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/credit_lock_test", "postgres", "credit-lock-test")
-        Flyway.configure().dataSource(ds).locations("filesystem:src/main/resources/db/migration").load().migrate()
+        val ds = SharedPostgres.database(migrated = true)
         jdbc = JdbcTemplate(ds)
         context = AnnotationConfigApplicationContext()
         context.register(AdminCreditPostgresConfig::class.java)
@@ -82,14 +74,16 @@ class AdminCreditPostgresConcurrencyTests {
             CreditPolicyService(context.getBean(CreditPolicyRepository::class.java), 1000, 2000, 10, 250, 250)
         })
         context.register(PostgresCreditAdminLocks::class.java, AdminChangeActorRepository::class.java, AdminAuditService::class.java, AdminCreditPolicyService::class.java,
-            AdminCreditAdjustmentService::class.java, CreditWalletService::class.java, CreditWalletProvisioner::class.java)
+            AdminCreditAdjustmentService::class.java, CreditWalletService::class.java, CreditWalletProvisioner::class.java,
+            com.knk.manyak.auth.service.AccountQueryService::class.java, com.knk.manyak.auth.service.AccountLockService::class.java,
+            com.knk.manyak.auth.repository.PostgresAccountNoKeyUpdateLock::class.java, com.knk.manyak.auth.repository.AdminActorAccountLockJdbc::class.java)
         context.refresh()
         tx = TransactionTemplate(context.getBean(PlatformTransactionManager::class.java))
         policy = context.getBean(AdminCreditPolicyService::class.java)
         adjustment = context.getBean(AdminCreditAdjustmentService::class.java)
         locks = context.getBean(CreditAdminLocks::class.java)
     }
-    @AfterAll fun stop() { if (::context.isInitialized) context.close(); pg.stop() }
+    @AfterAll fun stop() { if (::context.isInitialized) context.close() }
     @BeforeEach fun clean() {
         jdbc.execute("TRUNCATE admin_accounts, admin_audit_logs, credit_admin_adjustments, credit_lots, credit_transactions, credit_wallets, credit_policies, users RESTART IDENTITY CASCADE")
         val users = context.getBean(UserRepository::class.java)

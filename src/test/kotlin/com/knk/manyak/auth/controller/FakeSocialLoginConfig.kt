@@ -1,6 +1,6 @@
 package com.knk.manyak.auth.controller
 
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.social.SocialIdTokenVerifier
 import com.knk.manyak.auth.social.SocialUserInfo
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore

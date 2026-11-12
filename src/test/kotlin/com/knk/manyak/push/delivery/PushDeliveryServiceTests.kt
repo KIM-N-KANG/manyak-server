@@ -15,7 +15,7 @@ import java.time.ZoneOffset
 class PushDeliveryServiceTests {
     @Test fun `기본 통계 기간은 UTC 자정이 아닌 KST 오늘까지 7일이다`() {
         val repository = mock(PushDeliveryRepository::class.java)
-        val service = PushDeliveryService(repository, mock(UserRepository::class.java),
+        val service = PushDeliveryService(repository, com.knk.manyak.auth.service.AccountQueryService(mock(UserRepository::class.java)),
             Clock.fixed(Instant.parse("2026-10-20T15:00:00Z"), ZoneOffset.UTC))
         val result = service.stats(null, null, null)
         assertThat(result.from).isEqualTo(LocalDate.parse("2026-10-15"))

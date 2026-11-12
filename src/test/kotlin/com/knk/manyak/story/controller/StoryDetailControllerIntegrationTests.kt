@@ -1,7 +1,7 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
@@ -17,19 +17,14 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import java.time.Instant
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class StoryDetailControllerIntegrationTests {
+class StoryDetailControllerIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -78,8 +73,8 @@ class StoryDetailControllerIntegrationTests {
             Story(
                 title = "작성자 있는 스토리",
                 userId = author.id,
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
-                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED,
             ),
         )
 
@@ -112,8 +107,8 @@ class StoryDetailControllerIntegrationTests {
             Story(
                 title = "소유 판단 스토리",
                 userId = owner.id,
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
-                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED,
             ),
         )
 
@@ -157,7 +152,7 @@ class StoryDetailControllerIntegrationTests {
 
     @Test
     fun `turnCount는 삭제된 채팅과 재생성을 포함한 누적 턴 수다`() {
-        val story = storyRepository.save(Story(title = "턴 집계 스토리", genre = "판타지", visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC, status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED))
+        val story = storyRepository.save(Story(title = "턴 집계 스토리", genre = "판타지", visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC, status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED))
         storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 3))
         storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 2, regeneratedCount = 1))
         // 소프트 삭제된 채팅도 합산한다.
@@ -283,8 +278,8 @@ class StoryDetailControllerIntegrationTests {
             Story(
                 title = "복수 시작 설정",
                 genre = "판타지",
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
-                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED,
             ),
         )
         val first = storyStartSettingRepository.save(StoryStartSetting(story = story, name = "첫 시작", prologue = "프롤로그1"))
@@ -345,8 +340,8 @@ class StoryDetailControllerIntegrationTests {
         val story = storyRepository.save(
             Story(
                 title = "대표 이미지 스토리",
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
-                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED,
             ),
         )
         val character = storyCharacterRepository.save(StoryCharacter(story = story, name = "레이"))
@@ -381,8 +376,8 @@ class StoryDetailControllerIntegrationTests {
         val story = storyRepository.save(
             Story(
                 title = "인물 있는 스토리",
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
-                status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
+                status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED,
             ),
         )
         // 저장 순서(= 컴파일 응답 순서)를 보존하는지 보려고 이미지 있는 인물과 없는 인물을 섞어 넣는다.

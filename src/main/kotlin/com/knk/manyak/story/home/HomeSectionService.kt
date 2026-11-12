@@ -1,7 +1,7 @@
 package com.knk.manyak.story.home
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.service.AdminAuditService
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
 import com.knk.manyak.global.error.ApiErrorDetail
 import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.story.entity.Story

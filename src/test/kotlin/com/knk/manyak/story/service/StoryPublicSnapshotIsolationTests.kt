@@ -1,7 +1,7 @@
 package com.knk.manyak.story.service
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.entity.Story
@@ -9,6 +9,7 @@ import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import jakarta.persistence.EntityManagerFactory
 import org.assertj.core.api.Assertions.assertThat
 import org.hibernate.SessionFactory
@@ -16,11 +17,7 @@ import org.hibernate.stat.Statistics
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -37,16 +34,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  *
  * 전용 H2로 분리한다 — 통계를 켜는 프로퍼티 때문에 별도 컨텍스트가 만들어지므로 기본 컨텍스트와 DB를 공유하면 안 된다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(
-    properties = [
-        "spring.jpa.properties.hibernate.generate_statistics=true",
-        "spring.datasource.url=jdbc:h2:mem:manyak-snapshot-isolation;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-    ],
-)
-class StoryPublicSnapshotIsolationTests {
+class StoryPublicSnapshotIsolationTests : ScriptedAiIntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository

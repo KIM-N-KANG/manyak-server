@@ -1,5 +1,6 @@
 package com.knk.manyak.push.entity
 
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.dto.PushKind
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -12,15 +13,6 @@ import jakarta.persistence.Index
 import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
-
-/** 캠페인 한 건의 생애(KNK-1117). 상태 전이는 `SCHEDULED → SENDING → SENT|FAILED`이고 `CANCELED`는 집기 전에만 들어간다. */
-enum class PushCampaignStatus {
-    SCHEDULED,
-    SENDING,
-    SENT,
-    CANCELED,
-    FAILED,
-}
 
 /**
  * 프로모션 푸시의 예약과 이력(KNK-1117, V77, 스펙 §4-3-5).
@@ -91,7 +83,7 @@ class PushCampaign(
 
     @Enumerated(EnumType.STRING)
     @Column(name = "notice_tag", length = 16)
-    var noticeTag: com.knk.manyak.notice.entity.NoticeTag? = null,
+    var noticeTag: com.knk.manyak.notice.dto.NoticeTag? = null,
 
     /** 이동 대상 스토리의 내부 FK. API와 푸시 데이터에는 스토리 publicId를 사용한다. */
     @Column(name = "story_id")

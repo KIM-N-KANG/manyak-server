@@ -1,28 +1,28 @@
 package com.knk.manyak.chat.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.dto.ChatDetailResponse
 import com.knk.manyak.chat.dto.ChatShareResponse
 import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.dto.CreateChatShareResponse
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.credit.dto.CreditTransactionPageResponse
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.entity.StorySuggestedInput
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -30,16 +30,13 @@ import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 
@@ -55,11 +52,7 @@ import java.time.Instant
  *
  * 서재(`GET /users/me/chats`)·이용내역(`GET /users/me/credits/transactions`)·채팅 상세·공유 열람 넷을 같은 규칙으로 고정한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(properties = ["manyak.asset.image-base-url=https://cdn.test"])
-class ChatStorySnapshotIntegrationTests {
+class ChatStorySnapshotIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository
@@ -566,6 +559,21 @@ class ChatStorySnapshotIntegrationTests {
     }
 
     @Test
+    fun `비공개로 바뀐 스토리의 이용내역 스냅샷 제목도 이름 토큰을 주인공 이름으로 바꾼다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = storyRepository.save(
+            Story(userId = owner.id, title = "{username}이(가) 지킨 등대", protagonistName = "하늘", thumbnailImageKey = "thumb_0001"),
+        ).also(::publish)
+        val chat = createChat(story, reader)
+        chargeFor(chat, reader.id)
+
+        hideAndRename(story, "바뀐 제목")
+
+        assertThat(historyTitle(reader)).isEqualTo("하늘이 지킨 등대")
+    }
+
+    @Test
     fun `다시 공개하면 이용내역이 현재 제목으로 복귀한다`() {
         val owner = saveUser("소유자")
         val reader = saveUser("독자")
@@ -627,6 +635,19 @@ class ChatStorySnapshotIntegrationTests {
         hideAndRename(story, "바뀐 제목")
 
         assertThat(detailTitle(chat, owner)).isEqualTo("바뀐 제목")
+    }
+
+    @Test
+    fun `스토리가 삭제되면 채팅 상세는 스냅샷 제목을 보여준다`() {
+        val owner = saveUser("소유자")
+        val reader = saveUser("독자")
+        val story = publicStory(owner)
+        val chat = createChat(story, reader)
+
+        // 상세는 삭제된 스토리 행도 읽어(findById는 삭제를 거르지 않는다) 게이트가 스냅샷으로 보낸다.
+        deleteAndRename(story, "바뀐 제목")
+
+        assertThat(detailTitle(chat, reader)).isEqualTo("원래 제목")
     }
 
     // ---- 공유 열람 ----

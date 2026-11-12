@@ -1,7 +1,7 @@
 package com.knk.manyak.auth.repository
 
 import com.knk.manyak.auth.entity.SocialAccount
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query

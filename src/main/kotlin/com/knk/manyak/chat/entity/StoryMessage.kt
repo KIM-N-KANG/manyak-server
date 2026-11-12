@@ -1,5 +1,6 @@
 package com.knk.manyak.chat.entity
 
+import com.knk.manyak.chat.dto.MessageRole
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -9,12 +10,6 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import java.time.Instant
-
-enum class MessageRole {
-    USER,
-    ASSISTANT,
-    SYSTEM,
-}
 
 @Entity
 @Table(name = "story_messages")

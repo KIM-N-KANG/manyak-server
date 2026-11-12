@@ -1,5 +1,6 @@
 package com.knk.manyak.story.entity
 
+import com.knk.manyak.story.snapshot.StoryPublicSnapshot
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id

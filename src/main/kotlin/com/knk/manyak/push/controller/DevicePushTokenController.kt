@@ -1,6 +1,7 @@
 package com.knk.manyak.push.controller
 
 import com.knk.manyak.global.security.CurrentUserId
+import com.knk.manyak.global.security.requireUser
 import com.knk.manyak.push.dto.PushTokenDeleteRequest
 import com.knk.manyak.push.dto.PushTokenRegisterRequest
 import com.knk.manyak.push.service.DevicePushTokenService
@@ -19,7 +20,6 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
-import org.springframework.web.server.ResponseStatusException
 
 @Tag(name = "Push", description = "푸시 알림 API")
 @SecurityRequirement(name = "bearerAuth") // 인증 필수(/users/me/** 는 anyRequest().authenticated()).
@@ -74,7 +74,4 @@ class DevicePushTokenController(
     ) {
         devicePushTokenService.unregister(requireUser(userId), request.token)
     }
-
-    private fun requireUser(userId: Long?): Long =
-        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 }

@@ -1,30 +1,28 @@
 package com.knk.manyak.credit.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.dto.CreditTransactionPageResponse
 import com.knk.manyak.credit.entity.CreditLot
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 import java.util.Base64
@@ -37,10 +35,7 @@ import java.util.UUID
  * 원장 행을 서비스가 아니라 리포지토리로 넣는 이유는 createdAt·로트 만료일을 테스트가 정확히 통제해야
  * 하기 때문이다(소멸 행의 createdAt ≠ 실제 만료일 같은 케이스는 실제 흐름으로는 재현하기 어렵다).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class CreditTransactionHistoryIntegrationTests {
+class CreditTransactionHistoryIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository
@@ -244,6 +239,18 @@ class CreditTransactionHistoryIntegrationTests {
         tx(user.id, -20, CreditReason.STORY_CREATION, "STORY", session.id)
 
         assertThat(get(user).items.single().title).isEqualTo("심해의 등대")
+    }
+
+    @Test
+    fun `제목의 이름 토큰은 채팅 참조와 제작 참조 모두 주인공 이름과 조사로 바꾼다`() {
+        val user = saveUser()
+        val story = storyRepository.save(
+            Story(userId = user.id, title = "{username}이(가) 지킨 등대", protagonistName = "하늘"),
+        )
+        tx(user.id, -10, CreditReason.CHAT_TURN, "CHAT", chat(user.id, story.id).id, base)
+        tx(user.id, -20, CreditReason.STORY_CREATION, "STORY", session(user.id, story.id).id, base.plusSeconds(10))
+
+        assertThat(get(user).items.map { it.title }).containsExactly("하늘이 지킨 등대", "하늘이 지킨 등대")
     }
 
     @Test

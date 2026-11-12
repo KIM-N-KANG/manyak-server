@@ -1,16 +1,11 @@
 package com.knk.manyak.global.observability.analytics
 
-import com.knk.manyak.auth.entity.SocialProvider
-import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.global.observability.MdcKeys
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
-import org.mockito.Mockito.`when`
 import org.slf4j.MDC
-import java.util.Optional
 import java.util.UUID
 
 /**
@@ -27,14 +22,17 @@ class ServerAnalyticsTest {
     }
 
     private val publisher = CapturingPublisher()
-    private val userRepository: UserRepository = mock(UserRepository::class.java)
-    private val analytics = ServerAnalytics(publisher, userRepository)
+    private val publicIds = mutableMapOf<Long, UUID>()
+    private val failingLookups = mutableSetOf<Long>()
+    private val userPublicIds = UserPublicIdPort { id ->
+        if (id in failingLookups) throw IllegalStateException("lookup failed") else publicIds[id]
+    }
+    private val analytics = ServerAnalytics(publisher, userPublicIds)
 
     private val memberPublicId = UUID.randomUUID()
 
     private fun seedMember(userId: Long) {
-        val user = User(id = userId, nickname = "회원", publicId = memberPublicId)
-        `when`(userRepository.findById(userId)).thenReturn(Optional.of(user))
+        publicIds[userId] = memberPublicId
     }
 
     @AfterEach
@@ -130,7 +128,7 @@ class ServerAnalyticsTest {
     @Test
     fun `로그인 성공은 회원 public_id와 is_new_user를 싣는다`() {
         analytics.socialLoginSucceeded(
-            SocialProvider.GOOGLE,
+            "google",
             userPublicId = memberPublicId.toString(),
             isNewUser = true,
         )
@@ -144,7 +142,7 @@ class ServerAnalyticsTest {
 
     @Test
     fun `로그인 실패는 게스트로 발행하고 error_type을 싣는다`() {
-        analytics.socialLoginFailed(SocialProvider.GOOGLE, AnalyticsErrorType.VALIDATION)
+        analytics.socialLoginFailed("google", AnalyticsErrorType.VALIDATION)
 
         val e = publisher.events.single()
         assertThat(e.eventType).isEqualTo("server_login_googleLogin_processed_failed")
@@ -156,11 +154,11 @@ class ServerAnalyticsTest {
     fun `카카오 로그인은 provider별 이벤트명으로 발행한다`() {
         // 이벤트명만 갈리고 프로퍼티 계약은 같다(스펙 §6-4-2-8). 기존 googleLogin 이벤트명은 운영 발행 중이라 유지한다.
         analytics.socialLoginSucceeded(
-            SocialProvider.KAKAO,
+            "kakao",
             userPublicId = memberPublicId.toString(),
             isNewUser = false,
         )
-        analytics.socialLoginFailed(SocialProvider.KAKAO, AnalyticsErrorType.VALIDATION)
+        analytics.socialLoginFailed("kakao", AnalyticsErrorType.VALIDATION)
 
         assertThat(publisher.events.map { it.eventType }).containsExactly(
             "server_login_kakaoLogin_processed_succeeded",
@@ -199,8 +197,8 @@ class ServerAnalyticsTest {
     @Test
     fun `로그인 경로가 없는 예약 provider는 이벤트를 발행하지 않는다`() {
         // APPLE·NAVER는 enum 예약분이다(스펙 §4-5). 이벤트명을 지어내지 않고 조용히 건너뛴다(관측이 로그인을 깨지 않게).
-        analytics.socialLoginSucceeded(SocialProvider.APPLE, userPublicId = memberPublicId.toString(), isNewUser = true)
-        analytics.socialLoginFailed(SocialProvider.NAVER, AnalyticsErrorType.VALIDATION)
+        analytics.socialLoginSucceeded("apple", userPublicId = memberPublicId.toString(), isNewUser = true)
+        analytics.socialLoginFailed("naver", AnalyticsErrorType.VALIDATION)
 
         assertThat(publisher.events).isEmpty()
     }
@@ -232,15 +230,15 @@ class ServerAnalyticsTest {
         val throwingPublisher = object : AnalyticsEventPublisher {
             override fun publish(event: AnalyticsEvent) = throw RuntimeException("boom")
         }
-        val safe = ServerAnalytics(throwingPublisher, userRepository)
+        val safe = ServerAnalytics(throwingPublisher, userPublicIds)
 
         // 예외가 던져지면 테스트가 실패한다(관측이 비즈니스를 깨지 않아야 함).
         safe.feedbackSubmissionSucceeded(userId = null)
     }
     @Test
     fun `회원 공개 ID 조회 실패와 부재는 게스트 이벤트로 바꾸지 않는다`() {
-        `when`(userRepository.findById(7L)).thenThrow(IllegalStateException("lookup failed"))
-        `when`(userRepository.findById(8L)).thenReturn(Optional.empty())
+        failingLookups += 7L
+        // 8L은 등록하지 않아 회원 부재(null)다.
 
         analytics.socialLinkSucceeded(7L, "google")
         analytics.socialLinkFailed(8L, "kakao", AnalyticsErrorType.SERVER)
@@ -251,7 +249,7 @@ class ServerAnalyticsTest {
     @Test
     fun `재가입과 탈퇴 초대 이벤트는 스펙 프로퍼티를 싣는다`() {
         val id = memberPublicId.toString()
-        analytics.socialLoginSucceeded(SocialProvider.GOOGLE, id, true, true)
+        analytics.socialLoginSucceeded("google", id, true, true)
         analytics.withdrawalSucceeded(id, 12L, true)
         analytics.inviteRedeemSucceeded(id, true)
         analytics.inviteRedeemFailed(id, InviteRedeemFailureReason.SELF_CODE)

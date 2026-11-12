@@ -11,7 +11,7 @@ import com.knk.manyak.story.client.AiStoryStartSettings
 import com.knk.manyak.story.client.AiStorylinesRequest
 import com.knk.manyak.story.client.AiStorylinesResponse
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.service.GuestTrialLimitService
@@ -19,27 +19,24 @@ import com.knk.manyak.story.client.StoryAiClient
 import com.knk.manyak.story.dto.GenerateSimpleStorylinesRequest
 import com.knk.manyak.story.dto.SimpleStoryCharacterRequest
 import com.knk.manyak.story.entity.StoryCreationRequest
-import com.knk.manyak.story.entity.StoryCreationRequestStatus
+import com.knk.manyak.story.dto.StoryCreationRequestStatus
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
-import com.knk.manyak.story.entity.StoryCreationStage
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationStage
 import com.knk.manyak.story.entity.StoryCreationStoryline
 import com.knk.manyak.story.repository.StoryCreationRequestRepository
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.story.repository.StoryCreationStorylineRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import io.micrometer.core.instrument.MeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 import java.util.UUID
@@ -52,10 +49,11 @@ import java.util.concurrent.atomic.AtomicInteger
  * - 같은 requestId 재요청은 COMPLETED면 저장된 결과를 AI 재호출 없이 돌려주고, PENDING이면 409, FAILED면 재실행한다.
  * - 소유 주체(게스트 디바이스)만 복구 조회할 수 있다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class SimpleStoryCreationRecoveryIntegrationTests {
+class SimpleStoryCreationRecoveryIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.story = scriptedFakeAiClientConfigFakeStoryAiClient
+    }
+
 
     companion object {
         val createStorylinesCalls = AtomicInteger(0)
@@ -67,10 +65,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         var storylineException: RuntimeException? = null
     }
 
-    @TestConfiguration
     class FakeAiClientConfig {
-        @Bean
-        @Primary
         fun fakeStoryAiClient(): StoryAiClient = object : StoryAiClient {
             override fun createStorylines(request: AiStorylinesRequest, traceLink: AiTraceLink): AiStorylinesResponse {
                 createStorylinesCalls.incrementAndGet()
@@ -109,7 +104,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     }
 
     @Autowired private lateinit var restTestClient: RestTestClient
-    @Autowired private lateinit var simpleStoryCreationService: com.knk.manyak.story.service.SimpleStoryCreationService
+    @Autowired private lateinit var simpleStoryCreationService: com.knk.manyak.story.service.SimpleStorylineService
     @Autowired private lateinit var requestRepository: StoryCreationRequestRepository
     @Autowired private lateinit var sessionRepository: StoryCreationSessionRepository
     @Autowired private lateinit var storylineRepository: StoryCreationStorylineRepository
@@ -119,7 +114,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
     @Autowired private lateinit var guestTrialLimitService: GuestTrialLimitService
 
-    @Autowired private lateinit var drafts: com.knk.manyak.user.draft.StoryDraftRepository
+    @Autowired private lateinit var drafts: com.knk.manyak.story.draft.StoryDraftRepository
     @Autowired private lateinit var wallets: com.knk.manyak.credit.service.CreditWalletService
 
     @Test
@@ -164,8 +159,8 @@ class SimpleStoryCreationRecoveryIntegrationTests {
 
     @Test fun `간편 완성은 요청 행 기록 때 초안을 삭제해 생성 실패에도 복원하지 않는다`() {
         val owner = userRepository.save(User(nickname = "제작자"))
-        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(UUID.randomUUID(), owner.id,
-            com.knk.manyak.user.draft.StoryDraftMode.SIMPLE, com.knk.manyak.user.draft.StoryDraftStage.STORY_DRAFT, 1, "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(UUID.randomUUID(), owner.id,
+            com.knk.manyak.story.draft.StoryDraftMode.SIMPLE, com.knk.manyak.story.draft.StoryDraftStage.STORY_DRAFT, 1, "{}"))
         val requestId = UUID.randomUUID()
         // 세션 미존재로 본 생성은 실패하지만 PENDING 기록 트랜잭션은 먼저 커밋된다.
         restTestClient.post().uri("/api/v1/stories/simple")
@@ -182,8 +177,8 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         val requestId = UUID.randomUUID()
         requestRepository.save(StoryCreationRequest(requestId = requestId, userId = owner.id,
             stage = StoryCreationStage.STORY_COMPLETION, status = StoryCreationRequestStatus.FAILED))
-        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(UUID.randomUUID(), owner.id,
-            com.knk.manyak.user.draft.StoryDraftMode.SIMPLE, com.knk.manyak.user.draft.StoryDraftStage.STORY_DRAFT, 1, "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(UUID.randomUUID(), owner.id,
+            com.knk.manyak.story.draft.StoryDraftMode.SIMPLE, com.knk.manyak.story.draft.StoryDraftStage.STORY_DRAFT, 1, "{}"))
         restTestClient.post().uri("/api/v1/stories/simple")
             .header("Authorization", "Bearer ${jwtTokenProvider.issueAccessToken(owner.publicId)}")
             .contentType(MediaType.APPLICATION_JSON)
@@ -194,10 +189,10 @@ class SimpleStoryCreationRecoveryIntegrationTests {
 
     @Test fun `간편 완성은 타인과 미존재 초안 때문에 실패하지 않고 타인 초안을 유지한다`() {
         val owner = userRepository.save(User(nickname = "제작자"))
-        wallets.reward(owner.id, 1000, com.knk.manyak.credit.entity.CreditReason.SIGNUP_REWARD, "signup:${owner.id}")
+        wallets.reward(owner.id, 1000, com.knk.manyak.credit.dto.CreditReason.SIGNUP_REWARD, "signup:${owner.id}")
         val other = userRepository.save(User(nickname = "타인"))
-        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(UUID.randomUUID(), other.id,
-            com.knk.manyak.user.draft.StoryDraftMode.SIMPLE, com.knk.manyak.user.draft.StoryDraftStage.STORY_DRAFT, 1, "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(UUID.randomUUID(), other.id,
+            com.knk.manyak.story.draft.StoryDraftMode.SIMPLE, com.knk.manyak.story.draft.StoryDraftStage.STORY_DRAFT, 1, "{}"))
         for (id in listOf(draft.id, UUID.randomUUID())) {
             val storyline = seedGeneratedStoryline()
             restTestClient.post().uri("/api/v1/stories/simple")
@@ -1088,7 +1083,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
         com.knk.manyak.story.entity.StoryCreationTag(
             category = category,
             name = name,
-            tagSource = com.knk.manyak.story.entity.StoryCreationTagSource.PREDEFINED,
+            tagSource = com.knk.manyak.story.dto.StoryCreationTagSource.PREDEFINED,
             sortOrder = sortOrder,
             isActive = true,
         ),
@@ -1169,7 +1164,7 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     private fun addLegacyGenre(name: String) {
         val tag = tagRepository.save(com.knk.manyak.story.entity.StoryCreationTag(
             name = name, category = com.knk.manyak.story.dto.SimpleStoryTagCategory.GENRE,
-            tagSource = com.knk.manyak.story.entity.StoryCreationTagSource.CUSTOM))
+            tagSource = com.knk.manyak.story.dto.StoryCreationTagSource.CUSTOM))
         legacySessionTags.save(com.knk.manyak.story.entity.StoryCreationSessionTag(
             creationSession = sessionRepository.findAll().single(), tag = tag))
     }
@@ -1177,3 +1172,5 @@ class SimpleStoryCreationRecoveryIntegrationTests {
     @Autowired private lateinit var tagRepository: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var storyRepository: com.knk.manyak.story.repository.StoryRepository
 }
+
+private val scriptedFakeAiClientConfigFakeStoryAiClient = SimpleStoryCreationRecoveryIntegrationTests.FakeAiClientConfig().fakeStoryAiClient()

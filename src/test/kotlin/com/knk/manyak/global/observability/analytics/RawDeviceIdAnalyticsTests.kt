@@ -1,7 +1,6 @@
 package com.knk.manyak.global.observability.analytics
 
-import com.knk.manyak.auth.entity.SocialProvider
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.global.observability.*
 import com.knk.manyak.global.observability.sentry.SentryMdcEventProcessor
 import io.sentry.Hint
@@ -10,7 +9,6 @@ import io.sentry.protocol.Request
 import jakarta.servlet.FilterChain
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import org.mockito.Mockito.mock
 import org.slf4j.MDC
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
@@ -24,7 +22,7 @@ class RawDeviceIdAnalyticsTests {
     private val events = mutableListOf<AnalyticsEvent>()
     private val analytics = ServerAnalytics(object : AnalyticsEventPublisher {
         override fun publish(event: AnalyticsEvent) { events.add(event) }
-    }, mock(UserRepository::class.java))
+    }) { null }
     private val publisher = AmplitudeAnalyticsEventPublisher(false, "", "https://example.invalid")
 
     private fun request(deviceId: String? = raw) = MockHttpServletRequest("POST", "/api/v1/auth/social/google").apply {
@@ -33,8 +31,8 @@ class RawDeviceIdAnalyticsTests {
     }
 
     private fun emit(member: Boolean) {
-        if (member) analytics.socialLoginSucceeded(SocialProvider.GOOGLE, "member-public-id", false)
-        else analytics.socialLoginFailed(SocialProvider.GOOGLE, AnalyticsErrorType.VALIDATION)
+        if (member) analytics.socialLoginSucceeded("google", "member-public-id", false)
+        else analytics.socialLoginFailed("google", AnalyticsErrorType.VALIDATION)
     }
 
     @Test
@@ -129,9 +127,9 @@ class RawDeviceIdAnalyticsTests {
         try {
             val failing = ServerAnalytics(object : AnalyticsEventPublisher {
                 override fun publish(event: AnalyticsEvent) { throw IllegalStateException(raw) }
-            }, mock(UserRepository::class.java))
+            }) { null }
             filter.doFilter(request(), MockHttpServletResponse(), FilterChain { _, _ ->
-                failing.socialLoginFailed(SocialProvider.GOOGLE, AnalyticsErrorType.SERVER)
+                failing.socialLoginFailed("google", AnalyticsErrorType.SERVER)
             })
             assertThat(appender.list).isNotEmpty()
             assertThat(appender.list.map { it.formattedMessage }).allSatisfy { assertThat(it).doesNotContain(raw) }

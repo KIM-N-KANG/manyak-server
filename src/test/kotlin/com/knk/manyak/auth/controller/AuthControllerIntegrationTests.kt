@@ -3,13 +3,16 @@ package com.knk.manyak.auth.controller
 import com.knk.manyak.auth.config.AuthProperties
 import com.knk.manyak.auth.dto.TokenResponse
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.token.AuthTokenService
 import com.knk.manyak.auth.token.InMemoryRefreshTokenStore
 import com.knk.manyak.auth.token.RefreshTokenStore
+import com.knk.manyak.credit.dto.CreditReason
+import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import com.nimbusds.jose.jwk.source.ImmutableSecret
 import com.nimbusds.jose.proc.SecurityContext
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm
@@ -21,11 +24,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Clock
 import java.time.Duration
@@ -41,11 +41,7 @@ import java.util.UUID
  *
  * refresh 저장은 Redis 인프라 없이 검증하기 위해 InMemoryRefreshTokenStore(@Primary)로 대체한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AuthControllerIntegrationTests {
-
+class AuthControllerIntegrationTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
@@ -64,6 +60,9 @@ class AuthControllerIntegrationTests {
 
     @Autowired
     private lateinit var databaseCleaner: DatabaseCleaner
+
+    @Autowired
+    private lateinit var creditWalletService: CreditWalletService
 
     @BeforeEach
     fun setUp() {
@@ -240,6 +239,26 @@ class AuthControllerIntegrationTests {
             // 첫 페인트용 인라인 썸네일(스펙 §4-3-5 B17).
             .jsonPath("$.profileThumbnailBase64").isEqualTo("dGh1bWJuYWls")
             .jsonPath("$.status").isEqualTo("ACTIVE")
+    }
+
+    @Test
+    fun `me는 크레딧 잔액과 오늘 출석 여부를 함께 돌려준다`() {
+        val user = saveUser()
+        val bearer = "Bearer ${jwtTokenProvider.issueAccessToken(user.publicId)}"
+        restTestClient.get().uri("/api/v1/auth/me").header("Authorization", bearer).exchange()
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$.creditBalance").isEqualTo(0)
+            .jsonPath("$.attendedToday").isEqualTo(false)
+
+        creditWalletService.reward(user.id, 250, CreditReason.SIGNUP_REWARD, "signup:${user.id}")
+        val attendance = restTestClient.post().uri("/api/v1/users/me/credits/attendance").header("Authorization", bearer)
+            .exchange().expectStatus().isOk.expectBody(Map::class.java).returnResult().responseBody!!
+        val expectedBalance = 250 + (attendance["amount"] as Number).toLong()
+
+        restTestClient.get().uri("/api/v1/auth/me").header("Authorization", bearer).exchange()
+            .expectStatus().isOk.expectBody()
+            .jsonPath("$.creditBalance").value<Number> { assertThat(it.toLong()).isEqualTo(expectedBalance) }
+            .jsonPath("$.attendedToday").isEqualTo(true)
     }
 
     @Test

@@ -1,17 +1,16 @@
 package com.knk.manyak.admin
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.submission.*
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
@@ -21,12 +20,9 @@ import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.UUID
 
-@org.springframework.context.annotation.Import(com.knk.manyak.auth.controller.FakeSocialLoginConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminAccountModerationIntegrationTests {
+class AdminAccountModerationIntegrationTests : IntegrationTest() {
     @Autowired lateinit var client: RestTestClient
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    @Autowired
     lateinit var users: UserRepository
     @Autowired lateinit var jwt: JwtTokenProvider
     @Autowired lateinit var jdbc: JdbcTemplate
@@ -107,10 +103,10 @@ class AdminAccountModerationIntegrationTests {
     @Autowired lateinit var claims: SubmissionClaimStore
     @Autowired lateinit var submissionService: StorySubmissionService
     @Autowired lateinit var authTokens: com.knk.manyak.auth.token.AuthTokenService
-    @Autowired lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
+    @Autowired lateinit var withdrawal: com.knk.manyak.auth.service.UserWithdrawalService
     @Autowired lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
-    lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
+    @Autowired
+    lateinit var auditRepository: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 
     @Test fun `새 관리자 네 경로는 앱 토큰과 무토큰 및 역할 없는 관리자 토큰을 거절한다`() {
         val user = member()
@@ -262,11 +258,11 @@ class AdminAccountModerationIntegrationTests {
         val suspended = member(UserStatus.SUSPENDED)
         val row = held()
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("injected"))
-            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java)
-                ?: com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = admin.id,
-                    category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-                    action = com.knk.manyak.admin.entity.AdminAuditAction.MEMBER_SUSPENDED,
-                    targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.MEMBER, targetId = "fixture", requestId = "fixture"))
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java)
+                ?: com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = admin.id,
+                    category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+                    action = com.knk.manyak.adminkit.audit.AdminAuditAction.MEMBER_SUSPENDED,
+                    targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.MEMBER, targetId = "fixture", requestId = "fixture"))
         call(HttpMethod.POST, "/members/${active.publicId}/suspension").expectStatus().is5xxServerError
         call(HttpMethod.DELETE, "/members/${suspended.publicId}/suspension").expectStatus().is5xxServerError
         call(HttpMethod.POST, "/moderation/holds/${row.publicId}/release").expectStatus().is5xxServerError

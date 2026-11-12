@@ -1,5 +1,6 @@
 package com.knk.manyak.story.entity
 
+import com.knk.manyak.story.dto.StoryReportReason
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -10,13 +11,6 @@ import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
 import java.time.Instant
-
-/** 신고 사유(스펙 §4-3-1 스토리 신고, KNK-1020). 세분화 수요가 생기면 값만 늘린다. */
-enum class StoryReportReason {
-    SPAM,
-    INAPPROPRIATE,
-    ETC,
-}
 
 /**
  * 스토리 신고(스펙 §4-3-1 스토리 신고, KNK-1020).

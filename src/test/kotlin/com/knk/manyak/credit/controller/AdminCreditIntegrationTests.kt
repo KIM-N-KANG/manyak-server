@@ -5,12 +5,11 @@ import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -23,10 +22,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 
-@org.springframework.context.annotation.Import(com.knk.manyak.credit.support.H2CreditAdminLocksConfig::class)
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminCreditIntegrationTests {
+class AdminCreditIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
@@ -63,19 +59,19 @@ class AdminCreditIntegrationTests {
     private fun delete(key: String) = client.method(org.springframework.http.HttpMethod.DELETE).uri("$root/policies/$key")
         .header("Authorization", "Bearer $token").contentType(MediaType.APPLICATION_JSON).body(mapOf("reason" to "이벤트 종료")).exchange()
 
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
-    private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
+    @Autowired
+    private lateinit var auditRepository: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 
     @Test fun `감사 저장 실패는 조정 원장 로트 잔액과 정책 변경을 모두 롤백한다`() {
         result(body(amount = 100))
         put("attendance_reward", policy(300)).expectStatus().isOk
-        val placeholder = com.knk.manyak.admin.entity.AdminAuditLog(
-            adminUserId = admin.id, category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-            action = com.knk.manyak.admin.entity.AdminAuditAction.CREDIT_GRANTED,
-            targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.MEMBER,
+        val placeholder = com.knk.manyak.adminkit.audit.AdminAuditLog(
+            adminUserId = admin.id, category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+            action = com.knk.manyak.adminkit.audit.AdminAuditAction.CREDIT_GRANTED,
+            targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.MEMBER,
             targetId = member.publicId.toString(), requestId = "matcher")
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("injected audit failure"))
-            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java) ?: placeholder)
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java) ?: placeholder)
         post(body(key = "failed-grant")).expectStatus().is5xxServerError
         post(body("REVOKE", 100, "failed-revoke")).expectStatus().is5xxServerError
         put("attendance_reward", policy(500)).expectStatus().is5xxServerError

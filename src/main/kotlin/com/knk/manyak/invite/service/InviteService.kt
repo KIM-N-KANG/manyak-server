@@ -1,9 +1,10 @@
 package com.knk.manyak.invite.service
 
-import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.auth.dto.UserStatus
+import com.knk.manyak.auth.service.AccountCommandService
+import com.knk.manyak.auth.service.AccountLockService
+import com.knk.manyak.auth.service.AccountQueryService
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditPolicyKey
 import com.knk.manyak.credit.service.CreditPolicyService
 import com.knk.manyak.credit.service.CreditWalletService
@@ -13,7 +14,7 @@ import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.global.observability.analytics.InviteRedeemFailureReason
 import com.knk.manyak.global.error.ApiErrorCodes
 import com.knk.manyak.global.error.CodedResponseStatusException
-import com.knk.manyak.global.security.requireActiveStatus
+import com.knk.manyak.auth.security.requireActiveStatus
 import com.knk.manyak.invite.dto.InviteRedeemResponse
 import com.knk.manyak.invite.dto.InviteResponse
 import org.springframework.http.HttpStatus
@@ -37,7 +38,9 @@ import java.time.ZoneId
  */
 @Service
 class InviteService(
-    private val userRepository: UserRepository,
+    private val locks: AccountLockService,
+    private val accounts: AccountQueryService,
+    private val commands: AccountCommandService,
     private val creditWalletService: CreditWalletService,
     private val creditPolicyService: CreditPolicyService,
     private val analytics: ServerAnalytics,
@@ -52,11 +55,12 @@ class InviteService(
      */
     @Transactional
     fun getOrCreateInvite(userId: Long): InviteResponse {
-        val user = userRepository.findByIdForUpdate(userId)
+        val locked = locks.lock(userId)
             ?: error("초대 코드를 발급할 사용자를 찾지 못했습니다: userId=$userId")
         // 정지·탈퇴 소모·쓰기 차단(스펙 §4-5 B20, KNK-499·1019). 잠금 후 재검사라 탈퇴 커밋 경합도 막는다.
-        requireActiveStatus(user.status)
-        val code = user.inviteCode ?: generateUniqueCode().also { user.inviteCode = it }
+        requireActiveStatus(locked.status)
+        val user = requireNotNull(accounts.inviteAccountOf(userId))
+        val code = user.inviteCode ?: generateUniqueCode().also { commands.assignInviteCode(userId, it) }
         // 이번 KST 월의 초대 보상 진행을 함께 내려, 상한 도달 후 보상 없는 초대 공유의 혼란을 줄인다(스펙 §4-3-7 B22).
         // 집계는 월 상한 판정과 같은 창([현재 KST 월 시작, 다음달 시작))·같은 역할 필터(초대자 몫만 — KNK-581)를
         // 재사용하므로 "이번 달 수령 건수"가 상한 스킵 경계와 정확히 일치하고, 코드 입력으로 받은 제출자 몫은 세지 않는다.
@@ -66,8 +70,8 @@ class InviteService(
             reason = CreditReason.INVITE_REWARD,
             windowStart = monthStart,
             windowEnd = monthEnd,
-            idempotencyKeyPrefix = inviterRoleKeyPrefix(user.rewardIdentity()),
-            idempotencyKeySuffix = inviterRoleKeySuffix(user.rewardIdentity()),
+            idempotencyKeyPrefix = inviterRoleKeyPrefix(user.rewardIdentity),
+            idempotencyKeySuffix = inviterRoleKeySuffix(user.rewardIdentity),
         )
         return InviteResponse(
             inviteCode = code,
@@ -93,10 +97,11 @@ class InviteService(
      */
     @Transactional
     fun redeem(userId: Long, rawCode: String): InviteRedeemResponse {
-        val redeemer = userRepository.findByIdForUpdate(userId)
+        val locked = locks.lock(userId)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         // 정지·탈퇴 소모·쓰기 차단(스펙 §4-5 B20, KNK-499·1019). 잠금 후 재검사라 탈퇴 커밋 경합도 막는다.
-        requireActiveStatus(redeemer.status)
+        requireActiveStatus(locked.status)
+        val redeemer = requireNotNull(accounts.inviteAccountOf(userId))
         // 사람이 카카오톡 본문을 보고 타이핑하는 값이라 trim·대문자 정규화 후 비교한다(발급 코드는 대문자+숫자).
         val code = rawCode.trim().uppercase()
         if (!CODE_FORMAT.matches(code)) {
@@ -116,7 +121,7 @@ class InviteService(
                 "이미 초대 코드를 입력한 계정입니다.",
             )
         }
-        val inviter = userRepository.findByInviteCode(code)
+        val inviter = accounts.inviteAccountByCode(code)
             ?: run {
                 analytics.inviteRedeemFailed(redeemer.publicId.toString(), InviteRedeemFailureReason.NOT_FOUND)
                 throw ResponseStatusException(HttpStatus.NOT_FOUND, "일치하는 초대 코드가 없습니다.")
@@ -156,8 +161,8 @@ class InviteService(
         }
         // 가입 순서 게이트(KNK-1404). 초대자는 제출자보다 먼저 가입한 회원이어야 한다. 보상 신원 id로 비교하므로
         // 재가입으로 나중 가입자가 되어 피할 수 없고, 서로의 코드를 등록하는 상호·순환 등록이 성립하지 않는다.
-        val inviterIdentity = inviter.rewardIdentity()
-        val redeemerIdentity = redeemer.rewardIdentity()
+        val inviterIdentity = inviter.rewardIdentity
+        val redeemerIdentity = redeemer.rewardIdentity
         if (inviterIdentity > redeemerIdentity) {
             analytics.inviteRedeemFailed(redeemer.publicId.toString(), InviteRedeemFailureReason.INVITER_NEWER)
             throw CodedResponseStatusException(
@@ -167,7 +172,7 @@ class InviteService(
             )
         }
         // 관계 저장(평생 1회 소진)과 양측 적립을 같은 트랜잭션에서 커밋한다. 적립 실패 시 관계도 함께 롤백된다.
-        redeemer.inviterUserId = inviter.id
+        commands.recordInviter(redeemer.id, inviter.id)
         // 정책값은 이 요청 안에서 한 번만 읽어 재사용한다(KNK-1056). 초대자·제출자 적립 사이에 값이 바뀌면
         // 같은 초대 한 건에서 양쪽 지급액이 어긋나고, 상한 판정과 응답 amount도 서로 다른 기준을 보게 된다.
         val inviteReward = creditPolicyService.amountOf(CreditPolicyKey.INVITE_REWARD)
@@ -247,7 +252,6 @@ class InviteService(
     private fun inviterRoleKeySuffix(rewardIdentity: Long): String = ":$rewardIdentity"
 
     /** 1회성·상한 대상 보상의 스코프(KNK-1053). NULL이면 자기 자신이라 재가입 없는 계정은 종전 값과 같다. */
-    private fun User.rewardIdentity(): Long = rewardIdentityUserId ?: id
 
     /** [instant]가 속한 KST 월의 [시작, 다음달 시작) 구간을 Instant로 반환한다(월 상한 집계 경계). */
     private fun kstMonthRangeOf(instant: Instant): Pair<Instant, Instant> {
@@ -261,7 +265,7 @@ class InviteService(
     private fun generateUniqueCode(): String {
         repeat(MAX_CODE_ATTEMPTS) {
             val candidate = randomCode()
-            if (!userRepository.existsByInviteCode(candidate)) return candidate
+            if (!accounts.isInviteCodeTaken(candidate)) return candidate
         }
         error("초대 코드 생성에 반복 실패했습니다(충돌 과다).")
     }

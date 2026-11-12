@@ -2,14 +2,13 @@ package com.knk.manyak.chat.controller
 
 import com.knk.manyak.chat.entity.StoryChatSummary
 import com.knk.manyak.chat.repository.StoryChatSummaryRepository
-
 import com.knk.manyak.chat.client.ChatCharacterImageEvent
 import com.knk.manyak.chat.client.ChatMessageRole
 import com.knk.manyak.chat.client.ChatTurnAiClient
 import com.knk.manyak.chat.client.ChatChoicesResult
 import com.knk.manyak.chat.client.ChatTurnAiRequest
 import com.knk.manyak.chat.client.ChatTurnAiResult
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryMessageRepository
@@ -18,18 +17,13 @@ import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.atomic.AtomicReference
 import java.time.Instant
@@ -43,16 +37,15 @@ import org.junit.jupiter.params.provider.CsvSource
  *
  * 가짜 AI 빈 때문에 별도 ApplicationContext가 만들어지므로 전용 in-memory H2로 분리한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(
-    properties = [
-        "manyak.chat.compact.enabled=true",
-        "spring.datasource.url=jdbc:h2:mem:manyak-regen-history;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-    ],
-)
-class ChatRegenerateHistoryIntegrationTests {
+class ChatRegenerateHistoryIntegrationTests : ScriptedAiIntegrationTest() {
+    // 압축(compact)이 켜진 경로를 검증한다. 설정 빈은 공용 스파이라 테스트마다 켜고, 끝나면 자동 reset된다.
+    @Autowired private lateinit var compactSettings: com.knk.manyak.chat.config.ChatCompactSettings
+
+    @BeforeEach fun installScriptedAi() {
+        org.mockito.Mockito.doReturn(true).`when`(compactSettings).enabled
+        ScriptedAi.chat = scriptedCapturingAiClientConfigCapturingChatTurnAiClient
+    }
+
     @Autowired lateinit var summaries: StoryChatSummaryRepository
 
     class CapturingChatTurnAiClient : ChatTurnAiClient {
@@ -77,18 +70,14 @@ class ChatRegenerateHistoryIntegrationTests {
         }
     }
 
-    @TestConfiguration
     class CapturingAiClientConfig {
-        @Bean
-        @Primary
         fun capturingChatTurnAiClient(): CapturingChatTurnAiClient = CapturingChatTurnAiClient()
     }
 
     @Autowired
     private lateinit var restTestClient: RestTestClient
 
-    @Autowired
-    private lateinit var capturingAiClient: CapturingChatTurnAiClient
+    private val capturingAiClient = scriptedCapturingAiClientConfigCapturingChatTurnAiClient
 
     @Autowired
     private lateinit var storyRepository: StoryRepository
@@ -253,3 +242,5 @@ class ChatRegenerateHistoryIntegrationTests {
             .responseBody
             ?: error("스트리밍 응답 본문이 비어 있습니다.")
 }
+
+private val scriptedCapturingAiClientConfigCapturingChatTurnAiClient = ChatRegenerateHistoryIntegrationTests.CapturingAiClientConfig().capturingChatTurnAiClient()

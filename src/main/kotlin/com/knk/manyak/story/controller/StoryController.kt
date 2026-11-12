@@ -1,7 +1,7 @@
 package com.knk.manyak.story.controller
 
-import com.knk.manyak.search.service.StorySearchService
 import com.knk.manyak.global.security.CurrentUserId
+import com.knk.manyak.global.security.requireUser
 import com.knk.manyak.story.dto.BatchStoryRequest
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.dto.ImagePresignRequest
@@ -46,7 +46,6 @@ import org.springframework.web.server.ResponseStatusException
 @RestController
 @RequestMapping("/api/v1/stories")
 class StoryController(
-    private val storySearchService: StorySearchService,
     private val storyService: StoryService,
     private val submissions: StorySubmissionService,
     private val storyImageService: StoryImageService,
@@ -97,7 +96,7 @@ class StoryController(
         @CurrentUserId userId: Long?,
         @Valid @RequestBody request: ImagePresignRequest,
     ): ImagePresignResponse = storyImageService.presignDraft(
-        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다."),
+        requireUser(userId),
         request,
     )
 
@@ -212,20 +211,6 @@ class StoryController(
         @Parameter(description = "이전 탐색 응답의 nextCursor. 생략하면 새 순서로 시작합니다.")
         @RequestParam(required = false) cursor: String?,
     ): StoryPageResponse = storyService.getExploreStories(userId, limit.coerceIn(MIN_LIMIT, MAX_LIMIT), cursor)
-
-    @Operation(summary = "공개 스토리 검색", description = "검색어는 trim 후 2~100자이며 관련도순으로 반환합니다. 다음 페이지는 같은 q와 nextCursor를 사용합니다.")
-    @ApiResponses(value = [
-        ApiResponse(responseCode = "200", description = "검색 성공", content = [Content(schema = Schema(implementation = StoryPageResponse::class))]),
-        ApiResponse(responseCode = "400", description = "검색어·커서 형식 오류", content = [Content(schema = Schema(hidden = true))]),
-        ApiResponse(responseCode = "503", description = "검색 미설정 또는 일시적 장애", content = [Content(schema = Schema(hidden = true))]),
-    ])
-    @GetMapping("/search")
-    fun searchStories(
-        @Parameter(required = true, description = "검색어(trim 후 2~100자)")
-        @RequestParam(required = false) q: String?,
-        @RequestParam(defaultValue = "20") limit: Int,
-        @RequestParam(required = false) cursor: String?,
-    ): StoryPageResponse = storySearchService.search(q.orEmpty(), limit, cursor)
 
     @Operation(
         summary = "스토리 상세 조회",
@@ -369,10 +354,6 @@ class StoryController(
         @PathVariable storyId: String,
         @CurrentUserId userId: Long?,
     ) = storyService.deleteStory(storyId, userId)
-
-    // 좋아요 경로는 anyRequest().authenticated()로 보호되지만, 토큰은 유효하나 사용자가 사라진 경우 null이 올 수 있어 401로 통일한다.
-    private fun requireUser(userId: Long?): Long =
-        userId ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
 
     private companion object {
         const val DEFAULT_LIMIT = 20

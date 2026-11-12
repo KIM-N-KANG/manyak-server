@@ -1,6 +1,7 @@
 package com.knk.manyak.story.repository
 
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.repository.StoryListExpressions.LIKE_COUNT
 import com.knk.manyak.story.repository.StoryListExpressions.POPULAR_SCORE
 import com.knk.manyak.story.repository.StoryListExpressions.TURN_COUNT
 import jakarta.persistence.LockModeType
@@ -18,8 +19,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
         SELECT s.publicId AS publicId, s.thumbnailImageUrl AS thumbnailImageUrl,
                s.thumbnailImageKey AS thumbnailImageKey, s.thumbnailModerationStatus AS thumbnailModerationStatus
         FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:requesterId IS NULL OR s.userId IS NULL OR s.userId <> :requesterId)
     """)
@@ -37,10 +38,6 @@ interface StoryRepository : JpaRepository<Story, Long> {
 
     // KNK-447: 회원 서재(내 스토리 목록). 요청자 소유·미삭제만 생성 최신순으로 조회한다. limit은 Pageable로 상한을 건다.
     fun findByUserIdAndDeletedAtIsNullOrderByCreatedAtDescIdDesc(userId: Long, pageable: Pageable): List<Story>
-    // 소프트 삭제된 스토리(deleted_at IS NOT NULL)는 조회·삭제 대상에서 제외한다.
-    fun findByIdAndDeletedAtIsNull(id: Long): Story?
-
-    fun findAllByIdInAndDeletedAtIsNull(ids: Collection<Long>): List<Story>
 
     // 인물 이미지 보상 삭제 판정(KNK-966): 커밋이 반영됐는데 응답만 유실된 모호한 실패에서 스토리 행이 남았는지 본다.
     // 삭제 여부를 가리지 않는다 — 행이 남아 있으면 image_url도 남아 있으므로 객체를 지우면 안 된다.
@@ -74,7 +71,7 @@ interface StoryRepository : JpaRepository<Story, Long> {
      * 공개 스토리 목록(KNK-149) 최신순 첫 페이지. 노출 조건은 네 가지를 모두 만족해야 한다 —
      * 발행·공개·미삭제·**회원 소유**. 게스트(소유자 없음) 스토리를 피드에 싣지 않는 이유는 작성자 신원이
      * 없어 카드에 작성자를 표기할 수 없고, 좋아요·신고 같은 소셜 기능의 책임 주체가 없기 때문이다.
-     * 간편 제작은 게스트도 PRIVATE으로 저장되므로([SimpleStoryCreationService], KNK-464) 실제로 걸러지는
+     * 간편 제작은 게스트도 PRIVATE으로 저장되므로([com.knk.manyak.story.service.SimpleStoryCompletionService], KNK-464) 실제로 걸러지는
      * 것은 일반 제작에서 PUBLIC을 지정한 게스트 스토리와 향후 경로다. 게스트가 로그인해 이관(소유권 획득)하면
      * 회원 소유가 되어 자연히 노출된다.
      *
@@ -86,8 +83,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY s.createdAt DESC, s.publicId DESC
@@ -99,8 +96,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND (s.createdAt < :createdAt OR (s.createdAt = :createdAt AND s.publicId < :publicId))
@@ -118,8 +115,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY $POPULAR_SCORE DESC, s.publicId DESC
@@ -131,8 +128,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND ($POPULAR_SCORE < :score
@@ -156,11 +153,11 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-        ORDER BY (SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) DESC, s.publicId DESC
+        ORDER BY $LIKE_COUNT DESC, s.publicId DESC
         """,
     )
     fun findPublicLikes(@Param("ownerId") ownerId: Long?, pageable: Pageable): List<Story>
@@ -169,14 +166,14 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
-          AND ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) < :likeCount
-               OR ((SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) = :likeCount
+          AND ($LIKE_COUNT < :likeCount
+               OR ($LIKE_COUNT = :likeCount
                    AND s.publicId < :publicId))
-        ORDER BY (SELECT COUNT(l) FROM StoryLike l WHERE l.storyId = s.id) DESC, s.publicId DESC
+        ORDER BY $LIKE_COUNT DESC, s.publicId DESC
         """,
     )
     fun findPublicLikesAfter(
@@ -194,8 +191,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
         ORDER BY $TURN_COUNT DESC, s.publicId DESC
@@ -207,8 +204,8 @@ interface StoryRepository : JpaRepository<Story, Long> {
     @Query(
         """
         SELECT s FROM Story s
-        WHERE s.status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED
-          AND s.visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC
+        WHERE s.status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED
+          AND s.visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC
           AND s.deletedAt IS NULL
           AND (:ownerId IS NULL OR s.userId = :ownerId)
           AND ($TURN_COUNT < :turnCount

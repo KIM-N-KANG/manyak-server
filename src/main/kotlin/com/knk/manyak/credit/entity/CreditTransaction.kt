@@ -1,5 +1,6 @@
 package com.knk.manyak.credit.entity
 
+import com.knk.manyak.credit.dto.CreditReason
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -10,24 +11,6 @@ import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
 import java.time.Instant
-
-/** 크레딧 증감 사유. 적립·환불은 양수 amount, 소모·만료는 음수 amount로 기록한다(balance = SUM(amount)). */
-enum class CreditReason {
-    SIGNUP_REWARD,
-    INVITE_REWARD,
-    ATTENDANCE_REWARD,
-    STORY_CREATION,
-    CHAT_TURN,
-    CHAT_IMAGE,
-    REFUND,
-    PURCHASE,
-    PURCHASE_REVERSAL,
-    ADMIN_GRANT,
-    ADMIN_REVOKE,
-
-    // 보상·환불 로트가 30일 유효기간을 넘겨 만료된 잔여를 회수하는 음수 행(스펙 §4-3-7 만료, B12).
-    EXPIRE,
-}
 
 /**
  * 크레딧 원장 행(append-only). 생성 후 수정하지 않는다 — 환불도 수정이 아니라 REFUND 행 추가다(스펙 §4-3-7).

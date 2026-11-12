@@ -2,7 +2,9 @@ package com.knk.manyak.credit.service
 
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditLot
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditCharge
+import com.knk.manyak.credit.dto.CreditExpiryTarget
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.entity.CreditWallet
 import com.knk.manyak.credit.repository.CreditLotRepository
@@ -20,7 +22,7 @@ import kotlin.math.min
 
 /** 양수 비용 한 항목. 서로 다른 refType으로 환불·대사 범위를 분리할 수 있다. */
 data class CreditDeduction(val amount: Long, val reason: CreditReason, val refType: String? = null, val refId: Long? = null)
-data class CreditDeductionOutcome(val balance: Long, val transactions: List<CreditTransaction>)
+data class CreditDeductionOutcome(val balance: Long, val charges: List<CreditCharge>)
 
 data class AdminWalletOutcome(val beforeBalance: Long, val appliedAmount: Long, val balance: Long, val expiresAt: Instant?, val transactionId: Long?)
 
@@ -65,6 +67,10 @@ class CreditWalletService(
      */
     @Transactional(readOnly = true)
     fun balanceOf(userId: Long): Long = lotRepository.sumActiveRemaining(userId, clock.instant())
+
+    /** 이프 만료 예정 알림 대상(NOTIFICATION이 호출). 창 안 잔여 로트를 가진 활성 회원별 가장 늦은 만료 시각, 회원 id 오름차순. */
+    fun expiryReminderTargets(now: Instant, until: Instant): List<CreditExpiryTarget> =
+        lotRepository.findExpiryReminderTargets(now, until)
 
     /** 멱등 키로 이미 처리된 원장 행이 있는지 확인한다. 조회 전용이며 부수효과(적립)가 없다(스펙 §4-3-5 B17 attendedToday 판정용). */
     @Transactional(readOnly = true)
@@ -272,14 +278,14 @@ class CreditWalletService(
             toConsume -= take
         }
         check(toConsume == 0L) { "FIFO 소진 후 남은 차감량이 있습니다: userId=$userId, remaining=$toConsume" }
-        val transactions = items.map { item ->
+        val charges = items.map { item ->
             transactionRepository.save(CreditTransaction(
                 userId = userId, amount = -item.amount, reason = item.reason,
                 refType = item.refType, refId = item.refId,
-            ))
+            )).let { CreditCharge(it.id, it.userId, it.amount, it.reason, it.refType) }
         }
         wallet.balance -= amount
-        return CreditDeductionOutcome(wallet.balance, transactions)
+        return CreditDeductionOutcome(wallet.balance, charges)
     }
 
     /**
@@ -289,6 +295,10 @@ class CreditWalletService(
      * 멱등·동시성: 지갑 행을 비관적 락으로 잡은 뒤 **현재 REFUND 수를 다시 세어** 부족분(`target − 현재`)만 발행한다.
      * 재실행·동시 실행이 겹쳐도 락 안 재확인이 초과 환불을 막는다. 이미 충분하면(부족분 ≤ 0) 아무것도 하지 않는다.
      * in-flight 환불이 [reward]로 유니크 키를 쓰는 것과 달리, 이 사후 환불의 멱등성은 이 재확인이 보장한다(키 없음).
+     *
+     * 잠그기 전에 같은 수를 한 번 먼저 세어 이미 충분하면 지갑을 잠그지 않는다(KNK-2066). 실패 뒤 정상 환불된 그룹은
+     * target이 영원히 양수라 대사마다 지갑을 잠갔다 풀기만 했다. 원장은 추가만 하고 지우거나 고치지 않으므로 환불 수는
+     * 줄지 않는다. 그래서 잠그기 전에 충분했던 그룹은 잠근 뒤에도 충분하고, 결과(발행 0)가 같다.
      *
      * @return 이번에 추가한 REFUND 행 수(0이면 이미 충분).
      */
@@ -302,6 +312,9 @@ class CreditWalletService(
     ): Int {
         require(unitAmount > 0) { "환불 단위액은 양수여야 합니다: $unitAmount" }
         if (targetRefundCount <= 0) return 0
+        if (transactionRepository.countByUserIdAndRefTypeAndRefIdAndReason(userId, refType, refId, CreditReason.REFUND) >=
+            targetRefundCount
+        ) return 0
         // 지갑이 없으면 차감된 적이 없다는 뜻이라 대사할 것도 없다.
         val wallet = walletRepository.findByUserIdForUpdate(userId) ?: return 0
         val currentRefunds = transactionRepository

@@ -1,14 +1,11 @@
 package com.knk.manyak.chat.migration
 
+import com.knk.manyak.support.SharedPostgres
 import org.flywaydb.core.Flyway
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
@@ -16,21 +13,17 @@ import org.junit.jupiter.api.TestInstance
 /** H2 ddl-auto와 별도로 구버전 데이터·구버전 INSERT·CHECK를 실제 PostgreSQL에서 검증한다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ChatCompactMigrationPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "compact-migration-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var jdbc: JdbcTemplate
     private var story = 0L
     private var oldChat = 0L
     @BeforeAll fun migrate() {
-        pg.start()
-        val datasource = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "compact-migration-test")
+        val datasource = SharedPostgres.database()
         Flyway.configure().dataSource(datasource).locations("classpath:db/migration").target("115").load().migrate()
         jdbc = JdbcTemplate(datasource)
         story = jdbc.queryForObject("INSERT INTO stories(title) VALUES ('요약 마이그레이션') RETURNING id", Long::class.java)!!
         oldChat = jdbc.queryForObject("INSERT INTO story_chats(story_id) VALUES (?) RETURNING id", Long::class.java, story)!!
         Flyway.configure().dataSource(datasource).locations("classpath:db/migration").load().migrate()
     }
-    @AfterAll fun stop() { pg.stop() }
     @Test fun `요약 끝 턴 마이그레이션은 기존 행과 컬럼 생략 삽입에 영을 채운다`() {
         assertThat(jdbc.queryForObject("SELECT summary_through_turn FROM story_chats WHERE id = ?", Int::class.java, oldChat)).isZero()
         assertThat(jdbc.queryForObject("INSERT INTO story_chats(story_id) VALUES (?) RETURNING summary_through_turn", Int::class.java, story)).isZero()

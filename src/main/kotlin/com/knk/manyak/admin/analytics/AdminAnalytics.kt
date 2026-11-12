@@ -41,13 +41,13 @@ class AdminAnalyticsService(private val snapshots: AnalyticsSnapshots, propertie
     }
     fun dashboard(request: com.knk.manyak.admin.dto.AdminChartsRequest): AdminAnalyticsResponse {
         val requested = request.resolve(clock); val range = AnalyticsRange(requested.from, requested.to)
-        val today = clock.instant().atZone(com.knk.manyak.admin.dto.AdminDateRange.KST).toLocalDate()
+        val today = clock.instant().atZone(com.knk.manyak.adminkit.query.AdminDateRange.KST).toLocalDate()
         val values = snapshots.load("/api/v1/admin/dashboard/analytics", range, dailyMetrics(),
             if (range.to == today) emptyList() else active.map { it to today }, timeout = java.time.Duration.ofSeconds(5))
         val ready = values.readyDates()
         if (ready.isEmpty()) throw AdminAnalyticsUnavailable()
         // 조회 도중 KST 날짜가 바뀌면 전날 값을 오늘 값으로 쓰지 않는다.
-        val currentDay = clock.instant().atZone(com.knk.manyak.admin.dto.AdminDateRange.KST).toLocalDate()
+        val currentDay = clock.instant().atZone(com.knk.manyak.adminkit.query.AdminDateRange.KST).toLocalDate()
         val current = active.mapNotNull { values.value(it, currentDay) }.takeIf { it.size == 3 }
         val used = ready.flatMap { values.values(it) } + current.orEmpty()
         return AdminAnalyticsResponse(values.asOf(used), range.from, range.to, current?.let(::counts),

@@ -5,15 +5,13 @@ import com.knk.manyak.auth.dto.MeResponse
 import com.knk.manyak.auth.dto.RefreshTokenRequest
 import com.knk.manyak.auth.dto.SocialLoginRequest
 import com.knk.manyak.auth.dto.TokenResponse
-import com.knk.manyak.auth.entity.SocialProvider
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.SocialProvider
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.link.AccountLinkService
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.service.MeResponseAssembler
 import com.knk.manyak.auth.social.SocialLoginService
 import com.knk.manyak.auth.token.AuthTokenService
-import com.knk.manyak.credit.service.AttendanceRewardService
-import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.global.observability.RequestCorrelationFilter
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.Content

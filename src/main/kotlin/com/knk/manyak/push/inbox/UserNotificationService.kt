@@ -1,7 +1,7 @@
 package com.knk.manyak.push.inbox
 
-import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.global.security.requireActiveStatus
+import com.knk.manyak.auth.service.AccountQueryService
+import com.knk.manyak.auth.security.requireActiveStatus
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -11,7 +11,7 @@ import java.util.UUID
 
 @Service
 class UserNotificationService(
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val store: UserNotificationStore,
     private val clock: Clock = Clock.systemUTC(),
 ) {
@@ -44,7 +44,7 @@ class UserNotificationService(
 
     // 내역 API는 사용자 행을 잠그지 않는다. 네 요청 모두 상태를 새로 확인한다.
     private fun activeUser(userId: Long?): Long {
-        val user = userId?.let { users.findById(it).orElse(null) }
+        val user = userId?.let(accounts::statusOf)
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "유효하지 않은 인증입니다.")
         requireActiveStatus(user.status)
         return user.id

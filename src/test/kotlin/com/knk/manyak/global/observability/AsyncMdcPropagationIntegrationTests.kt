@@ -1,5 +1,6 @@
 package com.knk.manyak.global.observability
 
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -8,7 +9,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
 import com.knk.manyak.push.config.PushAsyncConfig
-import org.springframework.test.context.ActiveProfiles
 import java.util.concurrent.Executor
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
@@ -19,9 +19,7 @@ import java.util.concurrent.TimeUnit
  * 기본 `@Async` 실행기 선택은 FeedbackAsyncExecutorIntegrationTests에서 실제 리스너 경로로 검증한다.
  * 컨텍스트를 새로 띄우지 않으려고 가장 흔한 `@SpringBootTest` 형태를 그대로 쓴다(캐시 재사용).
  */
-@ActiveProfiles("test")
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AsyncMdcPropagationIntegrationTests {
+class AsyncMdcPropagationIntegrationTests : IntegrationTest() {
 
     @Autowired
     @Qualifier(PushAsyncConfig.PUSH_EXECUTOR)

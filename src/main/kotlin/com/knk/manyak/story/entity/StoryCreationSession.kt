@@ -1,5 +1,6 @@
 package com.knk.manyak.story.entity
 
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -11,11 +12,6 @@ import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import java.time.Instant
 import java.util.UUID
-
-enum class StoryCreationSessionStatus {
-    STORYLINES_GENERATED,
-    STORY_CREATED,
-}
 
 @Entity
 @Table(name = "story_creation_sessions")

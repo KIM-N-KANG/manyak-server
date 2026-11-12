@@ -4,21 +4,16 @@ import com.knk.manyak.story.submission.*
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.story.dto.UpdateStoryRequest
 import com.knk.manyak.story.entity.Story
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 import org.springframework.http.MediaType
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class StorySubmissionIntegrationTests {
+class StorySubmissionIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var users: com.knk.manyak.auth.repository.UserRepository
     @Autowired private lateinit var stories: com.knk.manyak.story.repository.StoryRepository
@@ -27,17 +22,18 @@ class StorySubmissionIntegrationTests {
     @Autowired private lateinit var worker: com.knk.manyak.story.submission.SubmissionTransactions
     @Autowired private lateinit var mapper: tools.jackson.databind.ObjectMapper
     @Autowired private lateinit var cleaner: com.knk.manyak.support.DatabaseCleaner
-    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("storyModerationExecutor")
     private lateinit var executor: java.util.concurrent.Executor
     @org.junit.jupiter.api.BeforeEach fun clean() { cleaner.cleanAll(); com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리") }
+    @org.junit.jupiter.api.BeforeEach fun stopExecutors() = com.knk.manyak.support.stopExecuting(executor, pushExecutor)
 
-    @Autowired private lateinit var drafts: com.knk.manyak.user.draft.StoryDraftRepository
+    @Autowired private lateinit var drafts: com.knk.manyak.story.draft.StoryDraftRepository
 
     @Test fun `일반 접수 202에서 내 초안을 삭제하고 타인과 미존재 초안은 무시한다`() {
         val owner = users.save(User(nickname = "작가"))
         val other = users.save(User(nickname = "타인"))
-        fun draft(userId: Long) = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), userId,
-            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        fun draft(userId: Long) = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), userId,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
         val mine = draft(owner.id); val theirs = draft(other.id)
         val auth = "Bearer ${tokens.issueAccessToken(owner.publicId)}"
         for (id in listOf(mine.id, theirs.id, java.util.UUID.randomUUID())) {
@@ -53,8 +49,8 @@ class StorySubmissionIntegrationTests {
 
     @Test fun `일반 접수 검증 실패는 초안을 유지한다`() {
         val owner = users.save(User(nickname = "작가"))
-        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
-            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
         client.post().uri("/api/v1/stories/general").header("Authorization", "Bearer ${tokens.issueAccessToken(owner.publicId)}")
             .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request().copy(title = "", draftId = draft.id)))
             .exchange().expectStatus().isBadRequest
@@ -63,8 +59,8 @@ class StorySubmissionIntegrationTests {
 
     @Test fun `일반 접수 트랜잭션 롤백은 제출본과 초안 삭제를 함께 되돌린다`() {
         val owner = users.save(User(nickname = "작가"))
-        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
-            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
         assertThrows(IllegalStateException::class.java) {
             org.springframework.transaction.support.TransactionTemplate(transactionManager).executeWithoutResult {
                 service.create(request().copy(draftId = draft.id), owner.id)
@@ -79,8 +75,8 @@ class StorySubmissionIntegrationTests {
     @Test fun `REJECTED 제출본을 draftId와 함께 재제출하면 202이고 소유 초안이 삭제된다`() {
         val owner = users.save(User(nickname = "재제출 작가"))
         val row = seedSubmission(SubmissionStatus.REJECTED, owner.id)
-        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
-            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), owner.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
         client.put().uri("/api/v1/stories/submissions/${row.publicId}")
             .header("Authorization", "Bearer ${tokens.issueAccessToken(owner.publicId)}")
             .contentType(MediaType.APPLICATION_JSON).body(mapper.writeValueAsString(request().copy(draftId = draft.id)))
@@ -93,8 +89,8 @@ class StorySubmissionIntegrationTests {
     @Test fun `타인과 미존재 draftId는 무시하고 재제출 성공`() {
         val owner = users.save(User(nickname = "재제출 작가"))
         val other = users.save(User(nickname = "타인"))
-        val draft = drafts.save(com.knk.manyak.user.draft.StoryDraft(java.util.UUID.randomUUID(), other.id,
-            com.knk.manyak.user.draft.StoryDraftMode.GENERAL, com.knk.manyak.user.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), other.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
         for (id in listOf(draft.id, java.util.UUID.randomUUID())) {
             val row = seedSubmission(SubmissionStatus.REJECTED, owner.id)
             client.put().uri("/api/v1/stories/submissions/${row.publicId}")
@@ -217,7 +213,7 @@ class StorySubmissionIntegrationTests {
         org.junit.jupiter.api.Assertions.assertEquals("원본", stories.findById(story.id).orElseThrow().title)
         org.junit.jupiter.api.Assertions.assertEquals("제출", service.editForm(story.publicId.toString(), user.id).path("title").asText())
         val exception = org.junit.jupiter.api.Assertions.assertThrows(org.springframework.web.server.ResponseStatusException::class.java) {
-            service.update(story.publicId.toString(), com.knk.manyak.story.dto.UpdateStoryRequest(visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC), user.id)
+            service.update(story.publicId.toString(), com.knk.manyak.story.dto.UpdateStoryRequest(visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC), user.id)
         }
         org.junit.jupiter.api.Assertions.assertEquals(409, exception.statusCode.value())
     }
@@ -230,7 +226,7 @@ class StorySubmissionIntegrationTests {
     @Autowired private lateinit var runner: com.knk.manyak.story.submission.SubmissionExecutor
     @Autowired private lateinit var assembler: com.knk.manyak.story.submission.SubmissionFormAssembler
     @Autowired private lateinit var tokens: com.knk.manyak.auth.jwt.JwtTokenProvider
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    @Autowired
     private lateinit var ai: com.knk.manyak.story.submission.StoryModerationClient
 
     @Test fun `회원 HTTP 접수는 202와 UUID만 반환하고 타인 제출본은 404`() {
@@ -323,11 +319,12 @@ class StorySubmissionIntegrationTests {
     }
 
 
-    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "pushExecutor")
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("pushExecutor")
     private lateinit var pushExecutor: java.util.concurrent.Executor
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    @Autowired
     private lateinit var pushSender: com.knk.manyak.push.service.FcmPushSender
     @Autowired private lateinit var transactionManager: org.springframework.transaction.PlatformTransactionManager
+    @Autowired private lateinit var recorder: com.knk.manyak.push.inbox.DomainNotificationRecorder
 
     @Test fun `local 알림은 커밋 뒤에만 제출되며 servicePush 설정을 따른다`() {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
@@ -354,6 +351,26 @@ class StorySubmissionIntegrationTests {
         org.junit.jupiter.api.Assertions.assertEquals("SERVICE_PUSH_DISABLED", discarded.arguments[3])
     }
 
+    @Test fun `local 검수 반려는 알림 내역 1행과 발송 1건을 남긴다`() {
+        val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
+        service.create(request(), user.id)
+        val row = submissions.findAll().single()
+        org.mockito.Mockito.doAnswer { call -> (call.arguments[0] as Runnable).run(); null }.`when`(pushExecutor)
+            .execute(org.mockito.Mockito.any(Runnable::class.java))
+
+        worker.finish(row.id, row.attempt, com.knk.manyak.story.submission.ModerationResult("REJECTED", emptyList(), null))
+
+        val inbox = jdbc.queryForList("SELECT type, message_key, title FROM user_notifications")
+        org.junit.jupiter.api.Assertions.assertEquals(1, inbox.size)
+        org.junit.jupiter.api.Assertions.assertEquals("STORY_MODERATION_COMPLETED", inbox.single()["type"])
+        org.junit.jupiter.api.Assertions.assertEquals("story-moderation:${row.publicId}:${row.attempt}", inbox.single()["message_key"])
+        org.junit.jupiter.api.Assertions.assertEquals("검수에서 반려됐어요", inbox.single()["title"])
+        // 내역은 충돌 무시 삽입이라 행 수로는 이중 기록을 못 잡는다. 기록기는 이벤트 구독으로 한 번만 불린다.
+        val recorderSpy = org.springframework.test.util.AopTestUtils.getUltimateTargetObject<com.knk.manyak.push.inbox.DomainNotificationRecorder>(recorder)
+        org.junit.jupiter.api.Assertions.assertEquals(1, org.mockito.Mockito.mockingDetails(recorderSpy).invocations.count { it.method.name == "moderated" })
+        org.junit.jupiter.api.Assertions.assertEquals(1, org.mockito.Mockito.mockingDetails(pushSender).invocations.count { it.method.name == "sendToUser" })
+    }
+
     @Test fun `동시 CREATE 승인은 스토리를 한 번만 만든다`() {
         val user = users.save(com.knk.manyak.auth.entity.User(nickname = "제작자"))
         service.create(request(), user.id)
@@ -375,7 +392,7 @@ class StorySubmissionIntegrationTests {
         org.junit.jupiter.api.Assertions.assertEquals(0, submissions.count())
         org.junit.jupiter.api.Assertions.assertEquals(0, stories.count())
     }
-    @Autowired private lateinit var withdrawal: com.knk.manyak.user.service.UserWithdrawalService
+    @Autowired private lateinit var withdrawal: com.knk.manyak.auth.service.UserWithdrawalService
 
 
     @Test fun `승인 적용 검증 실패는 롤백 후 APPLY_FAILED로 기록한다`() {
@@ -670,8 +687,8 @@ class StorySubmissionIntegrationTests {
     @Autowired private lateinit var characters: com.knk.manyak.story.repository.StoryCharacterRepository
 
     private fun characterStory(): Pair<User, Story> {
-        val user = users.save(User(nickname = "소개 작가", status = com.knk.manyak.auth.entity.UserStatus.ACTIVE))
-        val story = stories.save(Story(userId = user.id, title = "소개 스토리", status = com.knk.manyak.story.entity.StoryStatus.PUBLISHED))
+        val user = users.save(User(nickname = "소개 작가", status = com.knk.manyak.auth.dto.UserStatus.ACTIVE))
+        val story = stories.save(Story(userId = user.id, title = "소개 스토리", status = com.knk.manyak.story.dto.StoryStatus.PUBLISHED))
         characters.save(com.knk.manyak.story.entity.StoryCharacter(story = story, name = "세린", description = "왕국을 지키는 기사"))
         characters.save(com.knk.manyak.story.entity.StoryCharacter(story = story, name = "루아", description = "길을 안내하는 동료"))
         characters.save(com.knk.manyak.story.entity.StoryCharacter(story = story, name = "소개 없음"))

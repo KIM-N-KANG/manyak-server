@@ -1,15 +1,13 @@
 package com.knk.manyak.admin
 
+import com.knk.manyak.adminkit.query.AdminPagination
+import com.knk.manyak.support.SharedPostgres
 import com.knk.manyak.admin.dto.*
 import com.knk.manyak.admin.repository.*
 import org.assertj.core.api.Assertions.assertThat
-import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.*
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
-import org.springframework.jdbc.datasource.DriverManagerDataSource
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.UUID
@@ -17,8 +15,6 @@ import java.util.UUID
 /** 앱 datasource와 분리한 실제 PostgreSQL: Flyway 및 운영 SQL의 바인딩·집계·정렬을 검증한다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AdminReadPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "admin-read-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var jdbc: JdbcTemplate
     private lateinit var reads: AdminReadRepository
     private lateinit var content: AdminContentRepository
@@ -32,9 +28,7 @@ class AdminReadPostgresTests {
     private val start = Instant.parse("2026-10-20T15:00:00Z")
 
     @BeforeAll fun start() {
-        pg.start()
-        val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "admin-read-test")
-        Flyway.configure().dataSource(ds).locations("classpath:db/migration").load().migrate()
+        val ds = SharedPostgres.database(migrated = true)
         jdbc = JdbcTemplate(ds)
         val named = NamedParameterJdbcTemplate(jdbc)
         reads = AdminReadRepository(named, ObjectMapper()); content = AdminContentRepository(named); charts = AdminChartsRepository(named)
@@ -57,7 +51,6 @@ class AdminReadPostgresTests {
         jdbc.update("INSERT INTO ai_call_logs(request_id,caller_service,feature,status,latency_ms,chat_id,story_id,created_at) VALUES ('pg','test','chat_response','SUCCEEDED',1000,?,?,'2026-10-21T00:01:00Z')", chatId, sid)
         jdbc.update("INSERT INTO admin_audit_logs(public_id,admin_user_id,category,action,target_type,target_id,request_id,created_at) VALUES (gen_random_uuid(),?,'ACCESS','MEMBER_VIEWED','MEMBER',?,'pg','2026-10-21T00:01:00Z')", userId, memberId.toString())
     }
-    @AfterAll fun stop() { pg.stop() }
 
     @Test fun `실제 PostgreSQL 누적 턴은 삭제와 이관 채팅을 포함하고 재생성은 제외한다`() {
         val owner = jdbc.queryForObject("INSERT INTO users(public_id,nickname) VALUES (?,'누적 턴 PG') RETURNING id", Long::class.java, UUID.randomUUID())!!
@@ -199,7 +192,7 @@ class AdminReadPostgresTests {
         assertThat(reads.payment(orderId)!!.priceKrw).isEqualTo(4800)
         val usage = reads.paymentUsage(userId, reads.firstPaidAt(memberId))
         assertThat(usage.second.creditsSpent).isEqualTo(20)
-        assertThat(reads.auditLogs(AdminAuditLogsRequest().apply { q = memberId.toString(); category = com.knk.manyak.admin.entity.AdminAuditCategory.ACCESS; from = "2026-10-21" }, AdminPagination(1, 20, "u.nickname asc")).totalElements).isEqualTo(1)
+        assertThat(reads.auditLogs(AdminAuditLogsRequest().apply { q = memberId.toString(); category = com.knk.manyak.adminkit.audit.AdminAuditCategory.ACCESS; from = "2026-10-21" }, AdminPagination(1, 20, "u.nickname asc")).totalElements).isEqualTo(1)
     }
     @Test fun `실제 PostgreSQL에서 전체 이프 거래의 방향과 KST 날짜 및 회원 요약을 조회한다`() {
         val page = reads.creditTransactions(AdminCreditTransactionsRequest().apply {

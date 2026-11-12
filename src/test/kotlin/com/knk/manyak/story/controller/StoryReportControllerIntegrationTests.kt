@@ -1,34 +1,29 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.entity.StoryReportReason
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryReportReason
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryReportRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
  * 스토리 신고(스펙 §4-3-1 스토리 신고, KNK-1020).
  * 등록 201·멱등(중복 신고 흡수), 인증 필수 401, 읽기 가시성 404, 검증 400, 정지 403.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class StoryReportControllerIntegrationTests {
+class StoryReportControllerIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository

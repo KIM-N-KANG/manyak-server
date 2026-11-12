@@ -9,21 +9,20 @@ import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.story.dto.StoryPageResponse
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryLike
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryLikeRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.StoryExploreSeedSource
+import com.knk.manyak.support.ConsentGateIntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.security.MessageDigest
 import java.time.Instant
@@ -31,13 +30,7 @@ import java.util.Base64
 import java.util.HexFormat
 import java.util.UUID
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = [
-    "manyak.asset.image-base-url=https://assets.example.com",
-    "manyak.official-user-public-id=11111111-2222-3333-4444-555555555555",
-])
-class StoryExploreControllerIntegrationTests {
+class StoryExploreControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var stories: StoryRepository
     @Autowired private lateinit var users: UserRepository
@@ -45,7 +38,7 @@ class StoryExploreControllerIntegrationTests {
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var chats: StoryChatRepository
     @Autowired private lateinit var likes: StoryLikeRepository
-    @MockitoBean private lateinit var seeds: StoryExploreSeedSource
+    @Autowired private lateinit var seeds: StoryExploreSeedSource
 
     @BeforeEach fun setup() {
         cleaner.cleanAll()
@@ -72,7 +65,7 @@ class StoryExploreControllerIntegrationTests {
 
     @Test fun `표지가 있는 발행 공개만 노출하고 회원 요청만 자기 소유를 제외한다`() {
         val me = users.save(User(nickname = "요청자"))
-        val author = users.save(User(publicId = UUID.fromString("11111111-2222-3333-4444-555555555555"), nickname = "공식 작가"))
+        val author = users.save(User(publicId = UUID.fromString(IntegrationTest.OFFICIAL_USER_PUBLIC_ID), nickname = "공식 작가"))
         val own = story(1, me.id)
         val member = story(2, author.id)
         val guest = story(3)
@@ -154,10 +147,7 @@ class StoryExploreControllerIntegrationTests {
     }
 }
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = ["manyak.auth.consent-gate.enabled=true"])
-class StoryExploreConsentIntegrationTests {
+class StoryExploreConsentIntegrationTests : ConsentGateIntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider

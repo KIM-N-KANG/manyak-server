@@ -1,6 +1,6 @@
 package com.knk.manyak.push.repository
 
-import com.knk.manyak.push.entity.PushCampaignStatus
+import com.knk.manyak.push.dto.PushCampaignStatus
 import java.util.UUID
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import com.knk.manyak.push.entity.PushCampaign
@@ -13,9 +13,6 @@ import java.time.Instant
 
 interface PushCampaignRepository : JpaRepository<PushCampaign, Long>, JpaSpecificationExecutor<PushCampaign> {
     fun findByPublicId(publicId: UUID): PushCampaign?
-    /** FK를 외부 식별자로 투영할 뿐 공지의 내용·상태·서비스 연산을 사용하지 않는다. */
-    @Query("SELECT n.publicId FROM Notice n WHERE n.id=:noticeId")
-    fun findNoticePublicId(noticeId: Long): UUID?
     fun findByStatusAndStartedAtLessThanEqual(status: PushCampaignStatus, cutoff: Instant): List<PushCampaign>
 
 
@@ -23,7 +20,7 @@ interface PushCampaignRepository : JpaRepository<PushCampaign, Long>, JpaSpecifi
     @Query(
         """
         SELECT c FROM PushCampaign c
-        WHERE c.status = com.knk.manyak.push.entity.PushCampaignStatus.SCHEDULED
+        WHERE c.status = com.knk.manyak.push.dto.PushCampaignStatus.SCHEDULED
           AND c.scheduledAt <= :now
         ORDER BY c.scheduledAt ASC
         """,
@@ -41,8 +38,8 @@ interface PushCampaignRepository : JpaRepository<PushCampaign, Long>, JpaSpecifi
     @Query(
         """
         UPDATE PushCampaign c
-        SET c.status = com.knk.manyak.push.entity.PushCampaignStatus.SENDING, c.startedAt = :startedAt
-        WHERE c.id = :id AND c.status = com.knk.manyak.push.entity.PushCampaignStatus.SCHEDULED
+        SET c.status = com.knk.manyak.push.dto.PushCampaignStatus.SENDING, c.startedAt = :startedAt
+        WHERE c.id = :id AND c.status = com.knk.manyak.push.dto.PushCampaignStatus.SCHEDULED
         """,
     )
     fun claim(@Param("id") id: Long, @Param("startedAt") startedAt: Instant): Int
@@ -56,7 +53,7 @@ interface PushCampaignRepository : JpaRepository<PushCampaign, Long>, JpaSpecifi
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""UPDATE PushCampaign c SET c.status = :status, c.targetCount = :targets,
         c.sentCount = :sent, c.finishedAt = :finishedAt, c.failureReason = :failureReason
-        WHERE c.id = :id AND c.status = com.knk.manyak.push.entity.PushCampaignStatus.SENDING
+        WHERE c.id = :id AND c.status = com.knk.manyak.push.dto.PushCampaignStatus.SENDING
           AND c.startedAt = :startedAt""")
     fun finishIfOwned(id: Long, startedAt: Instant, status: PushCampaignStatus,
         targets: Int?, sent: Int?, finishedAt: Instant, failureReason: String? = null): Int
@@ -64,10 +61,10 @@ interface PushCampaignRepository : JpaRepository<PushCampaign, Long>, JpaSpecifi
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""UPDATE PushCampaign c SET c.kind = :kind, c.noticeTag = :tag
-        WHERE c.id = :id AND c.status = com.knk.manyak.push.entity.PushCampaignStatus.SENDING
+        WHERE c.id = :id AND c.status = com.knk.manyak.push.dto.PushCampaignStatus.SENDING
           AND c.startedAt = :startedAt""")
     fun refreshNoticeIfOwned(id: Long, startedAt: Instant, kind: com.knk.manyak.push.dto.PushKind,
-        tag: com.knk.manyak.notice.entity.NoticeTag): Int
+        tag: com.knk.manyak.notice.dto.NoticeTag): Int
 
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
     @Modifying(clearAutomatically = true, flushAutomatically = true)

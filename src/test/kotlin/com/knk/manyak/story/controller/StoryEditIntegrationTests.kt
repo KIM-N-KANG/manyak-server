@@ -1,7 +1,7 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.image.service.UploadedImageStorage
@@ -13,14 +13,14 @@ import com.knk.manyak.story.entity.StoryEnding
 import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StorySetting
 import com.knk.manyak.story.entity.StoryStartSetting
-import com.knk.manyak.story.entity.StoryStatus
+import com.knk.manyak.story.dto.StoryStatus
 import com.knk.manyak.story.entity.StorySuggestedInput
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
-import com.knk.manyak.story.entity.StoryPublicSnapshot
+import com.knk.manyak.story.snapshot.StoryPublicSnapshot
 import com.knk.manyak.story.entity.StoryPublicSnapshotRow
 import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StoryRepository
@@ -29,6 +29,7 @@ import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.StorySuggestedInputRepository
 import com.knk.manyak.story.service.StoryPublicSnapshotService
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
@@ -36,29 +37,21 @@ import org.junit.jupiter.api.Test
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
  * 스토리 수정(GET /stories/{id}/edit · PATCH /stories/{id}, 스펙 §4-3-8·§4-8, KNK-404) 통합 테스트.
  * 편집 폼 왕복(통글 4필드 포함)·부분 갱신(보낸 필드만 교체)·소유권 403·검증 400을 확인한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
-class StoryEditIntegrationTests {
+class StoryEditIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
-    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("storyModerationExecutor")
     private lateinit var moderationExecutor: java.util.concurrent.Executor
 
 
-    @MockitoBean private lateinit var uploadedImageStorage: UploadedImageStorage
+    @Autowired private lateinit var uploadedImageStorage: UploadedImageStorage
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var storyRepository: StoryRepository
@@ -77,6 +70,7 @@ class StoryEditIntegrationTests {
 
     @BeforeEach
     fun setUp() {
+        com.knk.manyak.support.stopExecuting(moderationExecutor)
         databaseCleaner.cleanAll()
         `when`(uploadedImageStorage.isEnabled()).thenReturn(true)
         `when`(uploadedImageStorage.serveUrlOf(anyString())).thenAnswer { "https://cdn.test/${it.arguments[0]}" }

@@ -1,18 +1,20 @@
 package com.knk.manyak.push.service
 
 import com.google.firebase.messaging.AndroidConfig
-import com.knk.manyak.auth.entity.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.dto.UserStatus
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.entity.PushCampaign
 import com.knk.manyak.push.dto.PushKind
+import com.knk.manyak.push.dto.pushKind
 import com.knk.manyak.push.config.PushCampaignProperties
 import com.knk.manyak.global.observability.StructuredLogger
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import java.time.temporal.ChronoUnit
-import com.knk.manyak.push.entity.PushCampaignStatus
+import com.knk.manyak.push.dto.PushCampaignStatus
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.outbox.ScheduledPushOutboxWriter
-import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.notice.service.NoticeService
+import com.knk.manyak.story.service.StoryPlayReader
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.beans.factory.annotation.Value
@@ -35,16 +37,16 @@ data class PromotionPushResult(
 @EnableConfigurationProperties(PushCampaignProperties::class)
 class PromotionPushService(
     private val pushCampaignRepository: PushCampaignRepository,
-    private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     private val fcmPushSender: FcmPushSender,
-    private val stories: StoryRepository,
+    private val stories: StoryPlayReader,
     private val clock: Clock = Clock.systemUTC(),
     private val outbox: ScheduledPushOutboxWriter? = null,
     private val properties: PushCampaignProperties = PushCampaignProperties(),
     private val structuredLogger: StructuredLogger = StructuredLogger(),
     @Value("\${manyak.push.web-base-url:https://manyak.app}") private val webBaseUrl: String = "https://manyak.app",
     private val notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter,
-    private val notices: com.knk.manyak.notice.repository.NoticeRepository,
+    private val notices: NoticeService,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
@@ -82,13 +84,16 @@ class PromotionPushService(
         campaign.startedAt = now
         var targets = 0
         var sent = 0
+        // 선점 때 읽은 공지의 공개 식별자를 딥링크 조립에 다시 쓴다(공지는 캠페인에 연결되면 지울 수 없다).
+        var noticePublicId: UUID? = null
         return try {
             campaign.noticeId?.let { id ->
-                val notice = notices.findById(id).orElse(null)
-                if (notice == null || notice.status != com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED) {
+                val notice = notices.publicationOf(id)
+                if (notice == null || notice.status != com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED) {
                     return if (finish(campaign, PushCampaignStatus.FAILED, 0, 0, "NOTICE_NOT_PUBLISHED"))
                         PromotionPushResult(campaign.publicId, 0, 0, failed = true, kind = campaign.kind, reason = "NOTICE_NOT_PUBLISHED") else null
                 }
+                noticePublicId = notice.publicId
                 val tag = notice.tag
                 if (pushCampaignRepository.refreshNoticeIfOwned(campaign.id, now, tag.pushKind, tag) == 0) return null
                 campaign.kind = tag.pushKind
@@ -101,8 +106,8 @@ class PromotionPushService(
                 "title" to if (campaign.kind == PushKind.SERVICE) campaign.title else withAdPrefix(campaign.title),
                 "body" to if (campaign.kind == PushKind.SERVICE) campaign.body else withAdOptOutNotice(campaign.body),
             )
-            campaign.noticeId?.let { id ->
-                val publicId = requireNotNull(pushCampaignRepository.findNoticePublicId(id)) { "공지 참조가 없습니다." }
+            campaign.noticeId?.let {
+                val publicId = requireNotNull(noticePublicId) { "공지 참조가 없습니다." }
                 data["noticeId"] = publicId.toString()
                 campaign.noticeTag?.let { data["noticeTag"] = it.name }
                 data["deepLink"] = pushDeepLink(webBaseUrl, "/notices/$publicId", data.getValue("type"), campaign.publicId.toString())
@@ -117,7 +122,7 @@ class PromotionPushService(
                 val messagePrefix = if (campaign.kind == PushKind.SERVICE) "notice" else "promotion"
                 // 로컬 모드 롤백 경로는 발송 직전에 자격과 야간 여부를 확인한다.
                 val at = clock.instant()
-                val user = userRepository.findById(userId).orElse(null)
+                val user = accounts.pushRecipientOf(userId)
                 if (user == null || user.status != UserStatus.ACTIVE || (if (campaign.kind == PushKind.SERVICE) !user.servicePushEnabled else !user.canReceiveMarketingPush(at))) {
                     fcmPushSender.recordDiscarded(userId, data, "$messagePrefix:${campaign.publicId}:${user?.publicId}",
                         if (user?.status != UserStatus.ACTIVE) "NOT_ACTIVE"
@@ -145,7 +150,7 @@ class PromotionPushService(
         // 공지 캠페인의 이동 목적지는 기존 공지 링크를 유지한다.
         if (campaign.kind != PushKind.MARKETING || campaign.noticeId != null) return data
         val storyId = campaign.storyId ?: return data
-        val story = stories.findByIdAndDeletedAtIsNull(storyId)?.takeIf { it.isPubliclyListed() } ?: return data
+        val story = stories.findView(storyId, null)?.takeIf { it.publiclyListed } ?: return data
         return data + mapOf("storyId" to story.publicId.toString(),
             "deepLink" to pushDeepLink(webBaseUrl, "/stories/${story.publicId}", TYPE_PROMOTION, campaign.publicId.toString()))
     }

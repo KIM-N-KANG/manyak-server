@@ -1,7 +1,7 @@
 package com.knk.manyak.auth.social
 
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.user.service.nicknameKeyOf
+import com.knk.manyak.auth.service.nicknameKeyOf
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import kotlin.random.Random

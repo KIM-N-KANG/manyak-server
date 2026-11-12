@@ -8,22 +8,18 @@ import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.*
 import tools.jackson.databind.ObjectMapper
 import java.util.concurrent.Executor
 
-@ActiveProfiles("test")
-@SpringBootTest
-class SubmissionImageFreezeIntegrationTests {
+class SubmissionImageFreezeIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var providedGenreTags: com.knk.manyak.story.repository.StoryCreationTagRepository
     class Objects : S3Client {
         val bytes = mutableMapOf<String, String>()
@@ -48,7 +44,7 @@ class SubmissionImageFreezeIntegrationTests {
     private val s3 = object : S3UploadedImageStorage("assets", "", "", "https://cdn.test") {
         override val client: S3Client = objects
     }
-    @MockitoBean lateinit var storage: UploadedImageStorage
+    @Autowired lateinit var storage: UploadedImageStorage
     @Autowired lateinit var users: UserRepository
     @Autowired lateinit var stories: StoryRepository
     @Autowired lateinit var images: StoryCharacterImageRepository
@@ -57,9 +53,10 @@ class SubmissionImageFreezeIntegrationTests {
     @Autowired lateinit var runner: SubmissionExecutor
     @Autowired lateinit var mapper: ObjectMapper
     @Autowired lateinit var cleaner: DatabaseCleaner
-    @MockitoBean(name = "storyModerationExecutor") lateinit var executor: Executor
-    @MockitoBean lateinit var ai: StoryModerationClient
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("storyModerationExecutor") lateinit var executor: Executor
+    @Autowired lateinit var ai: StoryModerationClient
     @BeforeEach fun clean() {
+        com.knk.manyak.support.stopExecuting(executor)
         cleaner.cleanAll()
         com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리"); objects.bytes.clear(); objects.copies.clear()
         Mockito.`when`(storage.isEnabled()).thenReturn(true)

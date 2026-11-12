@@ -1,8 +1,8 @@
 package com.knk.manyak.story.admin
 
-import com.knk.manyak.admin.entity.AdminAuditAction
-import com.knk.manyak.admin.service.AdminAuditService
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.adminkit.audit.AdminAuditAction
+import com.knk.manyak.adminkit.audit.AdminAuditService
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.dto.*
 import com.knk.manyak.story.entity.*
@@ -22,7 +22,7 @@ import java.util.UUID
 @Service
 class AdminOriginalService(
     private val official: OfficialStoryAccount,
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val stories: StoryRepository,
     private val creation: GeneralStoryCreationService,
     private val edit: StoryEditService,
@@ -164,7 +164,7 @@ class AdminOriginalService(
         form.properties().forEach { (key, value) -> result.set(key, value) }
     }
     private fun summary(story: Story, chatCount: Long? = null, totalTurns: Long? = null): ObjectNode {
-        val owner = users.findById(requireNotNull(story.userId)).orElseThrow()
+        val owner = accounts.requireProfileOf(requireNotNull(story.userId))
         val counts = if (chatCount == null) jdbc.queryForMap("SELECT COUNT(*) AS chats, COALESCE(SUM(current_turn), 0) AS turns FROM story_chats WHERE story_id = ? AND deleted_at IS NULL", story.id) else null
         return mapper.createObjectNode().put("storyId", story.publicId.toString()).put("title", story.title)
             .put("status", story.status.name).put("visibility", story.visibility.name)

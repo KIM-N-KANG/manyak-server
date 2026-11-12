@@ -1,13 +1,15 @@
 package com.knk.manyak.chat.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.chat.dto.ChatStatus
 import com.knk.manyak.chat.dto.CreateChatResponse
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.*
 import com.knk.manyak.chat.repository.*
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.story.entity.Story
@@ -15,6 +17,7 @@ import com.knk.manyak.story.entity.StoryMainEvent
 import com.knk.manyak.story.entity.StoryStartSetting
 import com.knk.manyak.story.repository.*
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -22,26 +25,19 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.mockito.Mockito.*
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Instant
 import java.util.UUID
 
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ChatForkIntegrationTests {
+class ChatForkIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
     @Autowired private lateinit var chats: StoryChatRepository
-    @MockitoSpyBean private lateinit var messages: StoryMessageRepository
+    @Autowired private lateinit var messages: StoryMessageRepository
     @Autowired private lateinit var choices: StoryChoiceRepository
     @Autowired private lateinit var versions: StoryMessageVersionRepository
     @Autowired private lateinit var summaries: StoryChatSummaryRepository
@@ -229,6 +225,19 @@ class ChatForkIntegrationTests {
         assertEquals(9L, chats.sumTurnCountByStoryId(f.chat.storyId))
     }
 
+    @Test fun `원본 채팅의 스토리 행이 없으면 404이고 복사본을 남기지 않는다`() {
+        val f = fixture()
+        // story_chats.story_id는 테스트 스키마(ddl-auto)에서 FK가 없어 없는 스토리를 가리키게 만들 수 있다.
+        jdbc.update("UPDATE story_chats SET story_id=? WHERE id=?", 999_999_999L, f.chat.id)
+        try {
+            val before = chats.count()
+            request(f.chat.publicId.toString(), """{"turnId":${f.turns[0].id}}""").expectStatus().isNotFound
+            assertEquals(before, chats.count())
+        } finally {
+            // 없는 스토리를 가리키는 고아 행을 남기지 않는다.
+            jdbc.update("UPDATE story_chats SET story_id=? WHERE id=?", f.chat.storyId, f.chat.id)
+        }
+    }
     @Test fun `회원 정지 소유권 대상과 본문 검증은 계약의 상태 코드를 반환한다`() {
         val f = fixture()
         val body = """{"turnId":${f.turns[0].id}}"""
@@ -257,7 +266,7 @@ class ChatForkIntegrationTests {
         assertEquals(5L, adminEngagement.turns(Instant.EPOCH, until, emptyList()).values.sum())
         assertEquals(setOf(f.chat.id), adminEngagement.activity(Instant.EPOCH, until, emptyList()).map { it.chatId }.toSet())
         val rows = adminContent.stories(com.knk.manyak.admin.dto.AdminStoriesRequest(),
-            com.knk.manyak.admin.dto.AdminPagination(1, 20, "s.created_at DESC"), null)
+            com.knk.manyak.adminkit.query.AdminPagination(1, 20, "s.created_at DESC"), null)
         // 현재 진행 깊이는 원본 4 + 복사본 3. 생성 응답 수 5와 정의가 다르다.
         assertEquals(7L, rows.items.single().totalTurns)
         val before = adminDashboard.summary(until, Instant.EPOCH, emptyList()).chats

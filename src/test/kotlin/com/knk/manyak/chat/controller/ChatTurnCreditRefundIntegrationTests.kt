@@ -1,7 +1,7 @@
 package com.knk.manyak.chat.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.client.ChatCharacterImageEvent
@@ -13,7 +13,7 @@ import com.knk.manyak.chat.client.ChatTurnAiResult
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.entity.CreditPolicy
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.repository.CreditPolicyRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.credit.service.CreditPolicyKey
@@ -23,20 +23,18 @@ import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import io.micrometer.core.instrument.MeterRegistry
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Duration
 
@@ -47,23 +45,16 @@ import java.time.Duration
  * 전액 환불(REFUND 행 추가)돼 순잔액이 원복되는지 확인한다. 예외를 던지는 가짜 AI 빈(@Primary)이
  * 별도 ApplicationContext를 만들므로, 기본 테스트와 create-drop이 간섭하지 않도록 H2를 분리한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(
-    properties = [
-        "spring.datasource.url=jdbc:h2:mem:manyak-credit-refund;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-    ],
-)
-class ChatTurnCreditRefundIntegrationTests {
+class ChatTurnCreditRefundIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.chat = scriptedThrowingAiClientConfigThrowingChatTurnAiClient
+    }
+
     @Autowired private lateinit var chatModelService: com.knk.manyak.chat.service.ChatModelService
     @Autowired private lateinit var chatModelRepository: com.knk.manyak.chat.repository.ChatModelRepository
 
 
-    @TestConfiguration
     class ThrowingAiClientConfig {
-        @Bean
-        @Primary
         fun throwingChatTurnAiClient(): ChatTurnAiClient =
             object : ChatTurnAiClient {
                 override fun generateChoices(request: ChatTurnAiRequest, aiOutput: String, traceLink: AiTraceLink): ChatChoicesResult = ChatChoicesResult(emptyList())
@@ -274,3 +265,5 @@ class ChatTurnCreditRefundIntegrationTests {
             while (b13GuestTrialLimitService.reserveMember(member.id, com.knk.manyak.credit.service.GuestTrialLimitService.Counter.CHAT_TURN)) { /* drain */ }
         }
 }
+
+private val scriptedThrowingAiClientConfigThrowingChatTurnAiClient = ChatTurnCreditRefundIntegrationTests.ThrowingAiClientConfig().throwingChatTurnAiClient()

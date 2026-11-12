@@ -1,8 +1,7 @@
 package com.knk.manyak.admin
 
-import com.knk.manyak.admin.analytics.AdminMetricsTestClock
 import com.knk.manyak.auth.jwt.JwtTokenProvider
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryMessage
 import com.knk.manyak.chat.entity.StoryMessageVersion
@@ -11,14 +10,12 @@ import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryMessageVersionRepository
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.support.AdminMetricsIntegrationTest
 import com.knk.manyak.support.DatabaseCleaner
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
 import tools.jackson.databind.JsonNode
@@ -26,11 +23,8 @@ import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 import java.util.UUID
 
-@AutoConfigureRestTestClient
-@Import(AdminMetricsTestClock::class)
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.admin.dashboard.excluded-user-ids=900001,900002,900003"])
-class AdminMetricsRevisionIntegrationTests {
+class AdminMetricsRevisionIntegrationTests : AdminMetricsIntegrationTest() {
+    override val clockAt: java.time.Instant = java.time.Instant.parse("2026-10-23T03:00:00Z")
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var jdbc: JdbcTemplate
     @Autowired private lateinit var cleaner: DatabaseCleaner

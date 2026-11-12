@@ -1,11 +1,11 @@
 package com.knk.manyak.credit.service
 
 import com.knk.manyak.chat.repository.StoryChatRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
+import com.knk.manyak.credit.port.StoryCreationProgress
 import com.knk.manyak.credit.repository.CreditTransactionRepository
 import com.knk.manyak.global.observability.StructuredLogger
-import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.*
@@ -26,7 +26,7 @@ class ChatChargeFailureIsolationTests {
         `when`(transactions.findChatTurnCharges(cutoff, 2, org.springframework.data.domain.PageRequest.of(0, 500))).thenReturn(emptyList())
         `when`(rows.reconcile(1)).thenThrow(IllegalStateException("charge failure"))
         `when`(rows.reconcile(2)).thenReturn(true)
-        val service = CreditReconciliationService(transactions, mock(CreditWalletService::class.java), mock(StoryCreationSessionRepository::class.java), logger, Duration.ofMinutes(15), Clock.fixed(now, ZoneOffset.UTC), rows)
+        val service = CreditReconciliationService(transactions, mock(CreditWalletService::class.java), mock(StoryCreationProgress::class.java), logger, Duration.ofMinutes(15), Clock.fixed(now, ZoneOffset.UTC), rows)
         val result = service.reconcile()
         assertThat(result.chargesScanned).isEqualTo(2)
         assertThat(result.refundsEmitted).isEqualTo(1)
@@ -44,7 +44,7 @@ class ChatChargeFailureIsolationTests {
         `when`(transactions.findChatTurnCharges(cutoff, 501, page)).thenReturn(emptyList())
         for (id in 1L..500L) `when`(rows.reconcile(id)).thenThrow(IllegalStateException("persistent failure"))
         `when`(rows.reconcile(501)).thenReturn(true)
-        val service = CreditReconciliationService(transactions, mock(CreditWalletService::class.java), mock(StoryCreationSessionRepository::class.java), mock(StructuredLogger::class.java), Duration.ofMinutes(15), Clock.fixed(now, ZoneOffset.UTC), rows)
+        val service = CreditReconciliationService(transactions, mock(CreditWalletService::class.java), mock(StoryCreationProgress::class.java), mock(StructuredLogger::class.java), Duration.ofMinutes(15), Clock.fixed(now, ZoneOffset.UTC), rows)
         val result = service.reconcile()
         assertThat(result.chargesScanned).isEqualTo(501)
         assertThat(result.refundsEmitted).isEqualTo(1)

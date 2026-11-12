@@ -1,7 +1,7 @@
 package com.knk.manyak.push.service
 
-import com.knk.manyak.auth.entity.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.dto.UserStatus
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.dto.PushEligibilityResponse
 import com.knk.manyak.push.dto.PushEligibilityToken
 import com.knk.manyak.push.dto.PushKind
@@ -13,12 +13,12 @@ import java.util.UUID
 
 @Service
 class PushEligibilityService(
-    private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     private val devicePushTokenRepository: DevicePushTokenRepository,
 ) {
     @Transactional(readOnly = true)
     fun getEligibility(publicId: UUID, kind: PushKind, at: Instant): PushEligibilityResponse {
-        val user = userRepository.findByPublicId(publicId)
+        val user = accounts.pushRecipientOf(publicId)
             ?: return PushEligibilityResponse(allowed = false, reason = "USER_NOT_FOUND")
         if (user.status != UserStatus.ACTIVE) {
             return PushEligibilityResponse(allowed = false, reason = "NOT_ACTIVE")

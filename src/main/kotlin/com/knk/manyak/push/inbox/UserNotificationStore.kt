@@ -93,12 +93,12 @@ class UserNotificationStore(private val jdbc: JdbcTemplate) {
         getObject("public_id", UUID::class.java), NotificationCategory.valueOf(getString("category")),
         NotificationType.valueOf(getString("type")), getString("title"), getString("body"), getString("deep_link"),
         getObject("story_public_id", UUID::class.java), getObject("notice_public_id", UUID::class.java),
-        getString("notice_tag")?.let(com.knk.manyak.notice.entity.NoticeTag::valueOf),
+        getString("notice_tag")?.let(com.knk.manyak.notice.dto.NoticeTag::valueOf),
         getTimestamp("created_at").toInstant(), getTimestamp("read_at")?.toInstant(),
     )
 }
 
 data class NotificationContent(
     val type: NotificationType, val title: String, val body: String, val deepLink: String?,
-    val storyId: UUID? = null, val noticeId: UUID? = null, val noticeTag: com.knk.manyak.notice.entity.NoticeTag? = null,
+    val storyId: UUID? = null, val noticeId: UUID? = null, val noticeTag: com.knk.manyak.notice.dto.NoticeTag? = null,
 )

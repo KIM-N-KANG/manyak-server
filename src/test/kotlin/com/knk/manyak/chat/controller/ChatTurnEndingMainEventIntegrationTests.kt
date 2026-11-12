@@ -1,7 +1,7 @@
 package com.knk.manyak.chat.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.client.ChatCharacterImageEvent
@@ -14,13 +14,13 @@ import com.knk.manyak.chat.dto.ChatDetailResponse
 import com.knk.manyak.chat.dto.ChatShareResponse
 import com.knk.manyak.chat.dto.ChatSummaryResponse
 import com.knk.manyak.chat.dto.CreateChatShareResponse
-import com.knk.manyak.chat.entity.ChatStatus
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.ChatStatus
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatMainEventRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
 import com.knk.manyak.global.observability.AiTraceLink
 import com.knk.manyak.story.entity.Story
@@ -33,20 +33,15 @@ import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.repository.StoryStartSettingRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import com.knk.manyak.story.service.StoryPublicSnapshotService
+import com.knk.manyak.support.ScriptedAi
+import com.knk.manyak.support.ScriptedAiIntegrationTest
 import com.knk.manyak.support.awaitGenerationReleased
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.TestConfiguration
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.TestPropertySource
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.util.concurrent.atomic.AtomicReference
 
@@ -58,15 +53,11 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * AI 클라이언트를 요청 캡처 + 판정 결과 주입 가능한 가짜로 교체한다(가짜 빈 때문에 전용 H2로 분리).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@TestPropertySource(
-    properties = [
-        "spring.datasource.url=jdbc:h2:mem:manyak-ending-runtime;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH",
-    ],
-)
-class ChatTurnEndingMainEventIntegrationTests {
+class ChatTurnEndingMainEventIntegrationTests : ScriptedAiIntegrationTest() {
+    @BeforeEach fun installScriptedAi() {
+        ScriptedAi.chat = scriptedJudgingAiClientConfigJudgingChatTurnAiClient
+    }
+
 
     class JudgingChatTurnAiClient : ChatTurnAiClient {
         val lastRequest = AtomicReference<ChatTurnAiRequest>()
@@ -95,15 +86,12 @@ class ChatTurnEndingMainEventIntegrationTests {
         }
     }
 
-    @TestConfiguration
     class JudgingAiClientConfig {
-        @Bean
-        @Primary
         fun judgingChatTurnAiClient(): JudgingChatTurnAiClient = JudgingChatTurnAiClient()
     }
 
     @Autowired private lateinit var restTestClient: RestTestClient
-    @Autowired private lateinit var judgingAiClient: JudgingChatTurnAiClient
+    private val judgingAiClient = scriptedJudgingAiClientConfigJudgingChatTurnAiClient
     @Autowired private lateinit var storyRepository: StoryRepository
     @Autowired private lateinit var storyStartSettingRepository: StoryStartSettingRepository
     @Autowired private lateinit var storyMainEventRepository: StoryMainEventRepository
@@ -188,7 +176,7 @@ class ChatTurnEndingMainEventIntegrationTests {
         streamGuest(chat.publicId.toString(), "첫 턴")
         assertThat(judgingAiClient.lastTraceLink.get().turnNumber).isEqualTo(1)
         assertThat(judgingAiClient.lastRequest.get().endings.map { it.name }).containsExactly("해피")
-        val turn = chatService.getChatDetail(chat.publicId.toString(), null).turns.single()
+        val turn = chatQueryService.getChatDetail(chat.publicId.toString(), null).turns.single()
 
         val captured = if (choicesOnly) {
             chatService.generateChoices(chat.publicId.toString(), turn.id, null)
@@ -760,6 +748,7 @@ class ChatTurnEndingMainEventIntegrationTests {
 
     @Autowired private lateinit var settings: com.knk.manyak.story.repository.StorySettingRepository
     @Autowired private lateinit var chatService: com.knk.manyak.chat.service.ChatService
+    @Autowired private lateinit var chatQueryService: com.knk.manyak.chat.service.ChatQueryService
 
     @Test fun `페르소나 AI 이름 충돌을 원문 사건으로 복원하고 같은 표로 되돌린다`() {
         story.protagonistName = "기본"
@@ -784,7 +773,7 @@ class ChatTurnEndingMainEventIntegrationTests {
         assertThat(next.targetMainEvent!!.name).isEqualTo("민우의 사건")
         assertThat(next.occurredMainEventNames).containsExactly("민우의 사건 (3)")
         assertThat(next.history.map { it.content }).contains("{username} 입력 원문", "{username} 출력 원문")
-        val turn = chatService.getChatDetail(chat.publicId.toString(), null).turns.last()
+        val turn = chatQueryService.getChatDetail(chat.publicId.toString(), null).turns.last()
         chatService.generateChoices(chat.publicId.toString(), turn.id, null)
         assertThat(judgingAiClient.lastChoicesRequest.get().storySettings.protagonistName).isEqualTo("민우")
         assertThat(judgingAiClient.lastChoicesRequest.get().storySettings.userRoleSetting).isEqualTo("완전히 다른 역할 {username}")
@@ -810,15 +799,15 @@ class ChatTurnEndingMainEventIntegrationTests {
         assertThat(updated.reachedEndingId).isEqualTo(tokenEnding.id)
         assertThat(updated.reachedEndingNameSnapshot).isEqualTo("{username}의 끝")
         assertThat(body).contains("\"reachedEnding\":\"민우의 끝\"")
-        val detail = chatService.getChatDetail(chat.publicId.toString(), null)
+        val detail = chatQueryService.getChatDetail(chat.publicId.toString(), null)
         assertThat(detail.turns.single().reachedEnding).isEqualTo("민우의 끝")
         assertThat(detail.turns.single().aiOutput).isEqualTo("{username} 그대로")
-        val card = chatService.getChatsByIds(com.knk.manyak.chat.dto.BatchChatRequest(listOf(chat.publicId.toString())), null).single()
+        val card = chatQueryService.getChatsByIds(com.knk.manyak.chat.dto.BatchChatRequest(listOf(chat.publicId.toString())), null).single()
         assertThat(card.reachedEndings).containsExactly("기본의 끝")
         val share = chatService.createChatShare(chat.publicId.toString(), null)
-        assertThat(chatService.getChatShare(share.shareId, null).turns.single().reachedEnding).isEqualTo("민우의 끝")
+        assertThat(chatQueryService.getChatShare(share.shareId, null).turns.single().reachedEnding).isEqualTo("민우의 끝")
     }
-    @Autowired private lateinit var personas: com.knk.manyak.user.service.UserPersonaService
+    @Autowired private lateinit var personas: com.knk.manyak.auth.service.UserPersonaService
     @Autowired private lateinit var storyService: com.knk.manyak.story.service.StoryService
 
     @Test fun `서로 다른 페르소나와 기본 주인공의 같은 엔딩은 원문 하나로 집계된다`() {
@@ -828,8 +817,8 @@ class ChatTurnEndingMainEventIntegrationTests {
         val member = userRepository.save(User(nickname = "플레이어"))
         jdbcTemplate.update("UPDATE stories SET user_id = ? WHERE id = ?", member.id, story.id)
         creditWalletService.reward(member.id, 1000, CreditReason.SIGNUP_REWARD, "signup:${member.id}")
-        val first = personas.create(member.id, com.knk.manyak.user.dto.CreateUserPersonaRequest("하늘", "항해사"))
-        val second = personas.create(member.id, com.knk.manyak.user.dto.CreateUserPersonaRequest("서윤", "탐험가"))
+        val first = personas.create(member.id, com.knk.manyak.auth.dto.CreateUserPersonaRequest("하늘", "항해사"))
+        val second = personas.create(member.id, com.knk.manyak.auth.dto.CreateUserPersonaRequest("서윤", "탐험가"))
         val token = jwtTokenProvider.issueAccessToken(member.publicId)
         for ((personaId, name) in listOf(first.id to "하늘", second.id to "서윤", null to "기본")) {
             val created = chatService.createChat(com.knk.manyak.chat.dto.CreateChatRequest(story.publicId.toString(), personaId = personaId), member.id)
@@ -837,7 +826,7 @@ class ChatTurnEndingMainEventIntegrationTests {
             streamMember(created.id, "도달한다", token)
             val saved = storyChatRepository.findByPublicIdAndDeletedAtIsNull(java.util.UUID.fromString(created.id))!!
             assertThat(saved.reachedEndingNameSnapshot).isEqualTo("{username}의 끝")
-            assertThat(chatService.getChatDetail(created.id, member.id).turns.single().reachedEnding).isEqualTo("${name}의 끝")
+            assertThat(chatQueryService.getChatDetail(created.id, member.id).turns.single().reachedEnding).isEqualTo("${name}의 끝")
         }
         val reaches = userStoryEndingReachRepository.findByUserIdAndStoryId(member.id, story.id)
         assertThat(reaches).hasSize(1)
@@ -879,9 +868,11 @@ class ChatTurnEndingMainEventIntegrationTests {
         }
         assertThat(userStoryEndingReachRepository.findByUserIdAndStoryId(member.id, story.id).single().endingNameSnapshot).isEqualTo("{username}의 끝")
         assertThat(body).contains("\"reachedEnding\":\"하늘의 끝\"")
-        assertThat(chatService.getChatDetail(chat.publicId.toString(), member.id).turns.single().reachedEnding).isEqualTo("하늘의 끝")
-        assertThat(chatService.getChatsByIds(com.knk.manyak.chat.dto.BatchChatRequest(listOf(chat.publicId.toString())), member.id).single().reachedEndings).containsExactly("기본의 끝")
+        assertThat(chatQueryService.getChatDetail(chat.publicId.toString(), member.id).turns.single().reachedEnding).isEqualTo("하늘의 끝")
+        assertThat(chatQueryService.getChatsByIds(com.knk.manyak.chat.dto.BatchChatRequest(listOf(chat.publicId.toString())), member.id).single().reachedEndings).containsExactly("기본의 끝")
         val share = chatService.createChatShare(chat.publicId.toString(), member.id)
-        assertThat(chatService.getChatShare(share.shareId, null).turns.single().reachedEnding).isEqualTo("하늘의 끝")
+        assertThat(chatQueryService.getChatShare(share.shareId, null).turns.single().reachedEnding).isEqualTo("하늘의 끝")
     }
 }
+
+private val scriptedJudgingAiClientConfigJudgingChatTurnAiClient = ChatTurnEndingMainEventIntegrationTests.JudgingAiClientConfig().judgingChatTurnAiClient()

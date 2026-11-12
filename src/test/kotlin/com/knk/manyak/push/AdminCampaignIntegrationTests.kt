@@ -3,17 +3,18 @@ package com.knk.manyak.push
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.push.dto.PushCampaignStatus
+import com.knk.manyak.push.dto.pushKind
 import com.knk.manyak.push.entity.*
 import com.knk.manyak.push.repository.*
 import com.knk.manyak.push.service.PushMessageTemplateService
 import com.knk.manyak.push.service.PushTemplateKey
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
@@ -26,9 +27,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class AdminCampaignIntegrationTests {
+class AdminCampaignIntegrationTests : IntegrationTest() {
     @Autowired private lateinit var client: RestTestClient
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var jwt: JwtTokenProvider
@@ -60,15 +59,15 @@ class AdminCampaignIntegrationTests {
     private fun templateGet() = mapper.readTree(call(HttpMethod.GET, "/templates/attendance_reminder")
         .expectStatus().isOk.expectBody(String::class.java).returnResult().responseBody!!)
 
-    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
-    private lateinit var auditRepository: com.knk.manyak.admin.repository.AdminAuditLogRepository
+    @Autowired
+    private lateinit var auditRepository: com.knk.manyak.adminkit.audit.AdminAuditLogRepository
 
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
 
     @Test fun `공지 연결은 태그로 종류를 정하고 첫 시각을 유지하며 감사에 공개 식별자를 남긴다`() {
-        for (tag in com.knk.manyak.notice.entity.NoticeTag.entries) {
+        for (tag in com.knk.manyak.notice.dto.NoticeTag.entries) {
             val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "본문", tag = tag,
-                status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED, createdByUserId = admin.id,
+                status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED, createdByUserId = admin.id,
                 // DB 정밀도에 맞춰 반올림될 수 있는 나노초 값으로 플랫폼 차이를 재현한다.
                 updatedAt = Instant.parse("2026-10-30T01:00:00.123456789Z")))
             val storedUpdatedAt = notices.findById(notice.id).orElseThrow().updatedAt
@@ -94,7 +93,7 @@ class AdminCampaignIntegrationTests {
 
     @Test fun `초안 해제 없는 공지와 두 이동 대상은 예약하지 않는다`() {
         val draft = notices.save(com.knk.manyak.notice.entity.Notice(title = "초안", body = "본문",
-            tag = com.knk.manyak.notice.entity.NoticeTag.SERVICE, createdByUserId = admin.id))
+            tag = com.knk.manyak.notice.dto.NoticeTag.SERVICE, createdByUserId = admin.id))
         for (id in listOf(draft.publicId, UUID.randomUUID()))
             call(HttpMethod.POST, "/campaigns", campaignBody().apply { put("noticeId", id.toString()) }).expectStatus().isBadRequest
         call(HttpMethod.POST, "/campaigns", campaignBody().apply { put("noticeId", draft.publicId.toString()); put("storyId", UUID.randomUUID().toString()) })
@@ -106,14 +105,14 @@ class AdminCampaignIntegrationTests {
 
     @Test fun `공지 연결 뒤 감사 실패는 캠페인과 첫 알림 시각을 롤백한다`() {
         val notice = notices.save(com.knk.manyak.notice.entity.Notice(title = "공지", body = "본문",
-            tag = com.knk.manyak.notice.entity.NoticeTag.UPDATE, status = com.knk.manyak.notice.entity.NoticeStatus.PUBLISHED,
+            tag = com.knk.manyak.notice.dto.NoticeTag.UPDATE, status = com.knk.manyak.notice.dto.NoticeStatus.PUBLISHED,
             createdByUserId = admin.id))
-        val placeholder = com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = admin.id,
-            category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-            action = com.knk.manyak.admin.entity.AdminAuditAction.PUSH_CAMPAIGN_CREATED,
-            targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.PUSH_CAMPAIGN, targetId = "fixture", requestId = "fixture")
+        val placeholder = com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = admin.id,
+            category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+            action = com.knk.manyak.adminkit.audit.AdminAuditAction.PUSH_CAMPAIGN_CREATED,
+            targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.PUSH_CAMPAIGN, targetId = "fixture", requestId = "fixture")
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("audit failure"))
-            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java) ?: placeholder)
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java) ?: placeholder)
         call(HttpMethod.POST, "/campaigns", campaignBody().apply { put("noticeId", notice.publicId.toString()) }).expectStatus().is5xxServerError
         assertThat(notices.findById(notice.id).orElseThrow().notifiedAt).isNull()
         assertThat(campaigns.count()).isZero()
@@ -124,12 +123,12 @@ class AdminCampaignIntegrationTests {
         val retryId = create()["campaignId"].asText()
         jdbc.update("UPDATE push_campaigns SET status='FAILED' WHERE public_id=?", UUID.fromString(retryId))
         templates.save(PushMessageTemplate(templateKey = "attendance_reminder", title = "기존", body = "본문", effectiveFrom = Instant.EPOCH))
-        val placeholder = com.knk.manyak.admin.entity.AdminAuditLog(adminUserId = admin.id,
-            category = com.knk.manyak.admin.entity.AdminAuditCategory.CHANGE,
-            action = com.knk.manyak.admin.entity.AdminAuditAction.PUSH_CAMPAIGN_CREATED,
-            targetType = com.knk.manyak.admin.entity.AdminAuditTargetType.PUSH_CAMPAIGN, targetId = cancelId, requestId = "matcher")
+        val placeholder = com.knk.manyak.adminkit.audit.AdminAuditLog(adminUserId = admin.id,
+            category = com.knk.manyak.adminkit.audit.AdminAuditCategory.CHANGE,
+            action = com.knk.manyak.adminkit.audit.AdminAuditAction.PUSH_CAMPAIGN_CREATED,
+            targetType = com.knk.manyak.adminkit.audit.AdminAuditTargetType.PUSH_CAMPAIGN, targetId = cancelId, requestId = "matcher")
         org.mockito.Mockito.doThrow(org.springframework.dao.DataIntegrityViolationException("injected audit failure"))
-            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.admin.entity.AdminAuditLog::class.java) ?: placeholder)
+            .`when`(auditRepository).save(org.mockito.ArgumentMatchers.any(com.knk.manyak.adminkit.audit.AdminAuditLog::class.java) ?: placeholder)
         call(HttpMethod.POST, "/campaigns", campaignBody()).expectStatus().is5xxServerError
         call(HttpMethod.POST, "/campaigns/$cancelId/cancel", mapOf("reason" to "취소")).expectStatus().is5xxServerError
         call(HttpMethod.POST, "/campaigns/$retryId/retry", mapOf("reason" to "재실행")).expectStatus().is5xxServerError

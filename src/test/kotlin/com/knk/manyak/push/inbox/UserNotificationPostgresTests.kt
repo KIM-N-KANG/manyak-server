@@ -1,13 +1,13 @@
 package com.knk.manyak.push.inbox
 
+import com.knk.manyak.auth.service.AccountQueryService
+import com.knk.manyak.push.repository.PushTargetRepository
+import com.knk.manyak.support.SharedPostgres
 import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.*
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
-import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.transaction.support.TransactionTemplate
-import org.testcontainers.containers.GenericContainer
-import org.testcontainers.containers.wait.strategy.Wait
 import java.io.File
 import java.time.Instant
 import java.util.UUID
@@ -16,16 +16,13 @@ import java.util.concurrent.CompletableFuture
 /** H2가 검증하지 않는 V111 제약·인덱스·동시 충돌을 격리된 실제 PostgreSQL에서 검증한다. */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class UserNotificationPostgresTests {
-    private val pg = GenericContainer("postgres:16-alpine").withEnv("POSTGRES_PASSWORD", "inbox-test")
-        .withExposedPorts(5432).waitingFor(Wait.forLogMessage(".*database system is ready to accept connections.*\\n", 2))
     private lateinit var jdbc: JdbcTemplate
     private lateinit var store: UserNotificationStore
     private lateinit var tx: TransactionTemplate
     private val now = Instant.parse("2026-10-24T00:00:00Z")
 
     @BeforeAll fun start() {
-        pg.start()
-        val ds = DriverManagerDataSource("jdbc:postgresql://${pg.host}:${pg.getMappedPort(5432)}/postgres", "postgres", "inbox-test")
+        val ds = SharedPostgres.database()
         jdbc = JdbcTemplate(ds)
         tx = TransactionTemplate(DataSourceTransactionManager(ds))
         jdbc.execute("""CREATE TABLE users(id BIGINT PRIMARY KEY, public_id UUID NOT NULL, status TEXT NOT NULL,
@@ -40,7 +37,6 @@ class UserNotificationPostgresTests {
         jdbc.execute(File("src/main/resources/db/migration/V114__credit_expiry_notification_type.sql").readText())
         store = UserNotificationStore(jdbc)
     }
-    @AfterAll fun stop() { pg.stop() }
     @BeforeEach fun clean() {
         jdbc.update("DELETE FROM users")
         jdbc.update("DELETE FROM credit_transactions")
@@ -78,7 +74,7 @@ class UserNotificationPostgresTests {
         val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
         val requestId = UUID.randomUUID()
         val row = com.knk.manyak.story.entity.StoryCreationRequest(id = 42, requestId = requestId,
-            userId = 1, stage = com.knk.manyak.story.entity.StoryCreationStage.STORY_COMPLETION)
+            userId = 1, stage = com.knk.manyak.story.dto.StoryCreationStage.STORY_COMPLETION)
         val users = org.mockito.Mockito.mock(com.knk.manyak.auth.repository.UserRepository::class.java) { call ->
             if (call.method.name == "findByIdForUpdate") {
                 completionAttempt.countDown()
@@ -105,8 +101,8 @@ class UserNotificationPostgresTests {
             }
         }
         val recorder = com.knk.manyak.story.service.StoryCreationRequestRecorder(repository,
-            tools.jackson.module.kotlin.jacksonObjectMapper(),
-            org.mockito.Mockito.mock(com.knk.manyak.user.draft.StoryDraftRepository::class.java), users, 300,
+            tools.jackson.module.kotlin.jacksonObjectMapper(), com.knk.manyak.global.observability.DeviceIdHasher(""),
+            org.mockito.Mockito.mock(com.knk.manyak.story.draft.StoryDraftRepository::class.java), com.knk.manyak.auth.service.AccountLockService(users, com.knk.manyak.auth.repository.AccountNoKeyUpdateLock { error("이 테스트는 이프 조정 잠금을 쓰지 않는다") }), 300,
             DataSourceTransactionManager(jdbc.dataSource!!))
         try {
             val replay = pool.submit {
@@ -128,7 +124,7 @@ class UserNotificationPostgresTests {
                     Unit
                 }
                 org.springframework.test.util.ReflectionTestUtils.invokeMethod<Unit>(recorder, "updateStatus",
-                    42L, com.knk.manyak.story.entity.StoryCreationRequestStatus.COMPLETED, "{}", recordNotification)
+                    42L, com.knk.manyak.story.dto.StoryCreationRequestStatus.COMPLETED, "{}", recordNotification)
             }
             val errors = listOf(completion, replay).mapNotNull { future ->
                 runCatching { future.get(15, java.util.concurrent.TimeUnit.SECONDS) }.exceptionOrNull()
@@ -212,8 +208,13 @@ class UserNotificationPostgresTests {
         val users = org.mockito.Mockito.mock(com.knk.manyak.auth.repository.UserRepository::class.java)
         val user = com.knk.manyak.auth.entity.User(id = 1, nickname = "원자성")
         org.mockito.Mockito.`when`(users.findById(1)).thenReturn(java.util.Optional.of(user))
-        org.mockito.Mockito.`when`(users.findAttendanceReminderTargetIds("2026-10-24")).thenReturn(listOf(1L))
-        org.mockito.Mockito.`when`(users.findMarketingPushTargetIds()).thenReturn(listOf(1L))
+        org.mockito.Mockito.`when`(users.findPublicIdsByIdIn(listOf(1L))).thenReturn(listOf(object : com.knk.manyak.auth.repository.UserPublicIdRow {
+            override val id = 1L
+            override val publicId = user.publicId
+        }))
+        val targets = org.mockito.Mockito.mock(PushTargetRepository::class.java)
+        org.mockito.Mockito.`when`(targets.findAttendanceReminderTargetIds("2026-10-24")).thenReturn(listOf(1L))
+        org.mockito.Mockito.`when`(targets.findMarketingPushTargetIds()).thenReturn(listOf(1L))
         val realOutbox = com.knk.manyak.push.outbox.PushOutboxStore(jdbc, tools.jackson.module.kotlin.jacksonObjectMapper())
         val failingOutbox = org.mockito.Mockito.spy(realOutbox)
         org.mockito.Mockito.doAnswer { call ->
@@ -230,14 +231,15 @@ class UserNotificationPostgresTests {
             context.environment.propertySources.addFirst(org.springframework.core.env.MapPropertySource("test", mapOf("manyak.push.web-base-url" to "https://manyak.app")))
             context.register(NotificationTransactionTestConfig::class.java)
             context.registerBean("transactionManager", DataSourceTransactionManager::class.java, java.util.function.Supplier { manager })
-            context.registerBean(com.knk.manyak.auth.repository.UserRepository::class.java, java.util.function.Supplier { users })
+            context.registerBean(AccountQueryService::class.java, java.util.function.Supplier { AccountQueryService(users) })
+            context.registerBean(PushTargetRepository::class.java, java.util.function.Supplier { targets })
             context.registerBean(UserNotificationStore::class.java, java.util.function.Supplier { store })
             context.registerBean(com.knk.manyak.push.repository.PushCampaignRepository::class.java, java.util.function.Supplier {
                 org.mockito.Mockito.mock(com.knk.manyak.push.repository.PushCampaignRepository::class.java) })
             context.register(ScheduledNotificationWriter::class.java)
             context.refresh()
             val round = context.getBean(ScheduledNotificationWriter::class.java)
-            val outbox = com.knk.manyak.push.outbox.ScheduledPushOutboxWriter(users, failingOutbox)
+            val outbox = com.knk.manyak.push.outbox.ScheduledPushOutboxWriter(AccountQueryService(users), failingOutbox)
             assertThatThrownBy {
                 round.record(mapOf("type" to if (scenario == "attendance") "ATTENDANCE_REMINDER" else "PROMOTION", "title" to "(광고) 제목", "body" to "본문"),
                     scenario, "2026-10-24", outbox)

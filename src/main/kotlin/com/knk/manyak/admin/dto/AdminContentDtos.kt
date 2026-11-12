@@ -2,41 +2,21 @@ package com.knk.manyak.admin.dto
 
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.adminkit.query.AdminAiRequest
+import com.knk.manyak.adminkit.query.AdminDateRange
+import com.knk.manyak.adminkit.query.badAdminQuery
+import com.knk.manyak.auth.dto.AdminMemberSummary
+import com.knk.manyak.auth.dto.UserStatus
 import jakarta.validation.constraints.Max
 import jakarta.validation.constraints.Min
-import jakarta.validation.constraints.Size
 import com.knk.manyak.image.service.ImageModerationStatus
 import com.knk.manyak.story.dto.StoryEditFormResponse
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryVisibility
 import io.swagger.v3.oas.annotations.media.Schema
 import java.time.Instant
 import java.time.LocalDate
-import java.util.Locale
 import java.util.UUID
 
-open class AdminSearchRequest : AdminListRequest() {
-    @field:Size(min = 1, max = 50) var q: String? = null
-    var from: String? = null
-    var to: String? = null
-    fun normalizedQuery(): String? = q?.let {
-        val normalized = it.trim().replace(Regex("\\s+"), " ").lowercase(Locale.ROOT)
-        if (normalized.isEmpty() || it.length > 50) badAdminQuery("검색어는 1~50자여야 합니다.")
-        normalized
-    }
-}
-open class AdminAiRequest : AdminSearchRequest() {
-    var aiFrom: String? = null
-    var aiTo: String? = null
-    var aiFeature: String? = null
-    var aiStatus: String? = null
-    var hasLatency: Boolean? = null
-    fun validateAi(features: Set<String>) {
-        if (aiFeature != null && aiFeature !in features) badAdminQuery("AI 기능이 올바르지 않습니다.")
-        if (aiStatus != null && aiStatus !in setOf("SUCCEEDED", "FAILED", "STARTED", "FINISHED")) badAdminQuery("AI 상태가 올바르지 않습니다.")
-        AdminDateRange.of(aiFrom, aiTo)
-    }
-}
 class AdminStoriesRequest : AdminAiRequest() {
     var scope: String? = null
     var genre: String? = null
@@ -118,7 +98,7 @@ data class AdminChatResponse(
 data class AdminTransactionResponse(val amount: Long, val reason: String, val balanceAfter: Long, val createdAt: Instant)
 data class AdminAttendanceResponse(val date: LocalDate, val creditAmount: Long)
 data class AdminPaymentDetailResponse(
-    val orderId: UUID, val member: AdminMemberSummary, val productId: String, val status: com.knk.manyak.credit.entity.CreditOrderStatus,
+    val orderId: UUID, val member: AdminMemberSummary, val productId: String, val status: com.knk.manyak.credit.dto.CreditOrderStatus,
     val priceKrw: Long, val creditAmount: Long, val completedAt: Instant, val refundedAt: Instant?, val reversalShortfall: Long?,
     val firstPaidAt: Instant, val before: AdminPaymentUsage, val after: AdminPaymentUsage,
 ) {

@@ -2,12 +2,10 @@ package com.knk.manyak.docs
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -17,10 +15,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * 402 등의 응답 타입(`code` 포함)을 만들지 못한다. 이를 `Schema(implementation = ApiErrorResponse::class)`로
  * 되돌려, 에러 바디가 `application/json` + `$ref: ApiErrorResponse`로 문서화됨을 고정한다.
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class OpenApiErrorResponseDocsTests {
+class OpenApiErrorResponseDocsTests : IntegrationTest() {
 
     @Autowired
     private lateinit var restTestClient: RestTestClient

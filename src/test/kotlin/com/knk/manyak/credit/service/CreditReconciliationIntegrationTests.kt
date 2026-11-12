@@ -1,29 +1,31 @@
 package com.knk.manyak.credit.service
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.repository.StoryChatRepository
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditReason
+import com.knk.manyak.credit.port.StoryCreationProgress
+import com.knk.manyak.credit.repository.CreditLotRepository
 import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.repository.CreditWalletRepository
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.entity.StoryCreationSession
-import com.knk.manyak.story.entity.StoryCreationSessionStatus
+import com.knk.manyak.story.dto.StoryCreationSessionStatus
 import com.knk.manyak.story.repository.StoryCreationSessionRepository
 import com.knk.manyak.support.DatabaseCleaner
 import ch.qos.logback.classic.Level
 import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.test.context.ActiveProfiles
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -39,13 +41,13 @@ import java.util.UUID
  * 시드한 charge는 실제 now에 만들어지므로, 시계를 미래로 둔 서비스로 대사해 "정지 상태(마지막 charge가
  * cutoff 이전)"를 재현한다. 시간가드(최신 charge 스킵)는 실제 now 시계로 검증한다.
  */
-@ActiveProfiles("test")
-@SpringBootTest
-class CreditReconciliationIntegrationTests {
-
+class CreditReconciliationIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var chargeReconciler: ChatChargeReconciler
+    @Autowired private lateinit var storyCreationProgress: StoryCreationProgress
     @Autowired private lateinit var transactionRepository: CreditTransactionRepository
+    @Autowired private lateinit var lotRepository: CreditLotRepository
+    @Autowired private lateinit var walletRepository: CreditWalletRepository
     @Autowired private lateinit var creditWalletService: CreditWalletService
     @Autowired private lateinit var storyChatRepository: StoryChatRepository
     @Autowired private lateinit var storyCreationSessionRepository: StoryCreationSessionRepository
@@ -77,7 +79,7 @@ class CreditReconciliationIntegrationTests {
 
     // 미래 시계: 시드한 charge(실제 now)가 cutoff(미래 now − 15m) 이전이 되게 해 "정지 상태"로 대사한다.
     private fun serviceAsOf(now: Instant) = CreditReconciliationService(
-        transactionRepository, creditWalletService, storyCreationSessionRepository,
+        transactionRepository, creditWalletService, storyCreationProgress,
         structuredLogger, threshold, Clock.fixed(now, ZoneOffset.UTC), chargeReconciler,
     )
 
@@ -324,6 +326,20 @@ class CreditReconciliationIntegrationTests {
     }
 
     @Test
+    fun `제작 세션이 없는 차감은 환불하지 않는다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val missingSessionId = 999_999L
+        chargeStory(userId, missingSessionId)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.groupsScanned).isEqualTo(1)
+        assertThat(result.refundsEmitted).isEqualTo(0)
+        assertThat(refundCount(userId, "STORY", missingSessionId)).isEqualTo(0)
+    }
+
+    @Test
     fun `스토리가 생성된 세션의 차감은 환불하지 않는다`() {
         val userId = saveUser()
         giveBalance(userId, 100)
@@ -334,5 +350,133 @@ class CreditReconciliationIntegrationTests {
 
         assertThat(result.refundsEmitted).isEqualTo(0)
         assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(0)
+    }
+
+    // 차감 1건 그룹에서는 완료 수 1과 NEVER_REFUND가 같은 결과(환불 0)라 판정 매핑을 구분하지 못한다. 2건으로 구분한다.
+    @Test
+    fun `제작 세션이 없으면 차감이 둘이어도 환불하지 않는다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val missingSessionId = 999_999L
+        chargeStory(userId, missingSessionId)
+        chargeStory(userId, missingSessionId)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(0)
+        assertThat(refundCount(userId, "STORY", missingSessionId)).isEqualTo(0)
+    }
+
+    @Test
+    fun `스토리가 생성된 세션에 차감이 둘이면 하나만 환불한다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val sessionId = seedSession(StoryCreationSessionStatus.STORY_CREATED)
+        chargeStory(userId, sessionId)
+        chargeStory(userId, sessionId)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(1)
+        assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(1)
+    }
+
+    @Test
+    fun `모자란 환불은 그룹 최소 차감액으로 발행하고 환불 로트를 만든다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val chatPk = seedChat(userId, currentTurn = 0)
+        chargeChat(userId, chatPk, amount = 20) // 큰 차감을 먼저 둬서 "첫 차감액"이 아니라 최소액임을 가린다
+        chargeChat(userId, chatPk)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(2)
+        val refunds = transactionRepository.findAll().filter { it.reason == CreditReason.REFUND }
+        assertThat(refunds).hasSize(2).allSatisfy { refund ->
+            assertThat(refund.amount).isEqualTo(cost)
+            assertThat(refund.refType).isEqualTo("CHAT")
+            assertThat(refund.refId).isEqualTo(chatPk)
+            assertThat(refund.idempotencyKey).isNull()
+        }
+        val lots = lotRepository.findByTransactionIdIn(refunds.map { it.id })
+        assertThat(lots).hasSize(2).allSatisfy { lot ->
+            assertThat(lot.originalAmount).isEqualTo(cost)
+            assertThat(lot.remaining).isEqualTo(cost)
+            assertThat(lot.expiresAt).isNotNull()
+        }
+    }
+
+    @Test
+    fun `일부만 환불된 그룹은 부족분만 발행한다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val chatPk = seedChat(userId, currentTurn = 0) // 3차감 모두 미완료, 그중 1건만 즉시 환불됨
+        repeat(3) { chargeChat(userId, chatPk) }
+        inflightRefund(userId, "CHAT", chatPk)
+        val afterInflight = creditWalletService.balanceOf(userId)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.refundsEmitted).isEqualTo(2)
+        assertThat(refundCount(userId, "CHAT", chatPk)).isEqualTo(3)
+        assertThat(creditWalletService.balanceOf(userId)).isEqualTo(afterInflight + 2 * cost)
+    }
+
+    @Test
+    fun `지갑이 없는 회원의 그룹은 환불하지 않는다`() {
+        val userId = saveUser()
+
+        val emitted = creditWalletService.reconcileRefunds(userId, "STORY", 999_999L, cost, targetRefundCount = 1)
+
+        assertThat(emitted).isEqualTo(0)
+        assertThat(refundCount(userId, "STORY", 999_999L)).isEqualTo(0)
+    }
+
+    @Test
+    fun `두 대사가 함께 잠금 전 확인을 통과해도 잠금 뒤 재확인으로 부족분만큼만 환불한다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val sessionId = seedSession(StoryCreationSessionStatus.STORYLINES_GENERATED)
+        chargeStory(userId, sessionId)
+        // 두 스레드가 지갑 잠금 직전에서 만나야 넘어간다. 한쪽이 잠금 전 확인에서 끝나면 장벽이 시간 초과로 깨진다.
+        // 그래서 "둘 다 잠금 전 환불 수 0을 보고 지갑 잠금에서 직렬화되는" 인터리빙이 매번 만들어진다.
+        val atLock = java.util.concurrent.CyclicBarrier(2)
+        // 리포지토리는 JDK 프록시라 callRealMethod가 안 된다. 스파이의 기본 응답(실제 빈 위임)으로 넘긴다.
+        val delegate = org.mockito.Mockito.mockingDetails(walletRepository).mockCreationSettings.defaultAnswer
+        org.mockito.Mockito.doAnswer { call ->
+            atLock.await(10, java.util.concurrent.TimeUnit.SECONDS)
+            delegate.answer(call)
+        }.`when`(walletRepository).findByUserIdForUpdate(userId)
+        val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
+        try {
+            val runs = List(2) {
+                executor.submit(java.util.concurrent.Callable {
+                    creditWalletService.reconcileRefunds(userId, "STORY", sessionId, cost, targetRefundCount = 1)
+                })
+            }
+            assertThat(runs.map { it.get(20, java.util.concurrent.TimeUnit.SECONDS) }).containsExactlyInAnyOrder(1, 0)
+        } finally {
+            executor.shutdownNow()
+        }
+        assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(1)
+        assertThat(creditWalletService.balanceOf(userId)).isEqualTo(100)
+    }
+
+    @Test
+    fun `환불이 이미 충분한 그룹은 지갑을 잠그지 않는다`() {
+        val userId = saveUser()
+        giveBalance(userId, 100)
+        val sessionId = seedSession(StoryCreationSessionStatus.STORYLINES_GENERATED)
+        chargeStory(userId, sessionId)
+        inflightRefund(userId, "STORY", sessionId) // 실패 뒤 정상 환불된 그룹: 있어야 할 환불 수 1을 이미 채움
+        org.mockito.Mockito.clearInvocations(walletRepository)
+
+        val result = serviceAsOf(future).reconcile()
+
+        assertThat(result.groupsScanned).isEqualTo(1)
+        assertThat(result.refundsEmitted).isEqualTo(0)
+        org.mockito.Mockito.verify(walletRepository, org.mockito.Mockito.never()).findByUserIdForUpdate(userId)
+        assertThat(refundCount(userId, "STORY", sessionId)).isEqualTo(1)
     }
 }

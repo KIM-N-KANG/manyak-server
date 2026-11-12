@@ -1,8 +1,8 @@
 package com.knk.manyak.credit.service
 
-import com.knk.manyak.credit.entity.CreditOrderProvider
-import com.knk.manyak.credit.entity.CreditOrderStatus
-import com.knk.manyak.credit.entity.CreditReason
+import com.knk.manyak.credit.dto.CreditOrderProvider
+import com.knk.manyak.credit.dto.CreditOrderStatus
+import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.GrobleRefundMark
 import com.knk.manyak.credit.repository.GrobleRefundMarkRepository
 import com.knk.manyak.credit.repository.CreditOrderRepository

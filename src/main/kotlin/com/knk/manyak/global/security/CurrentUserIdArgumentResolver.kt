@@ -1,7 +1,6 @@
 package com.knk.manyak.global.security
 
-import com.knk.manyak.auth.entity.UserStatus
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.global.util.parsePublicIdOrNull
 import org.springframework.core.MethodParameter
 import org.springframework.http.HttpStatus
 import org.springframework.security.core.context.SecurityContextHolder
@@ -9,10 +8,10 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.support.WebDataBinderFactory
 import org.springframework.web.context.request.NativeWebRequest
+import org.springframework.web.context.request.RequestAttributes
 import org.springframework.web.method.support.HandlerMethodArgumentResolver
 import org.springframework.web.method.support.ModelAndViewContainer
 import org.springframework.web.server.ResponseStatusException
-import java.util.UUID
 
 /**
  * [CurrentUserId] 파라미터를 현재 로그인 사용자의 내부 PK(Long)로 해석한다.
@@ -21,10 +20,15 @@ import java.util.UUID
  * - 인증이 없거나(익명), JwtAuthenticationToken이 아니거나, subject가 UUID가 아니거나, 그 사용자가 없으면 null을 반환한다.
  *
  * optional 인증 경로에서 익명 호출은 자연히 null이 되고, 유효 토큰만 user_id 귀속으로 이어진다.
+ *
+ * 앱 체인의 [DeletedAccountRejectionFilter]가 토큰 주체를 판정하며 회원 PK를 [RESOLVED_USER_ID_ATTRIBUTE]에 남기면,
+ * 그 속성의 subject가 현재 인증 토큰의 subject와 같을 때만 그 값을 쓰고 다시 조회하지 않는다(KNK-2068).
+ * 필터 뒤에서 인증이 다른 주체로 바뀌면 속성을 쓰지 않고 조회한다. 회원의 id와 public_id는 바뀌지 않고 회원 행은 지워지지 않으므로(탈퇴는 상태 변경)
+ * 다시 조회해도 같은 값이다. 속성이 없으면(필터를 타지 않은 경로, 회원 없음) 전과 같이 포트로 조회한다.
  */
 @Component
 class CurrentUserIdArgumentResolver(
-    private val userRepository: UserRepository,
+    private val accountAccess: AccountAccessPort,
 ) : HandlerMethodArgumentResolver {
 
     override fun supportsParameter(parameter: MethodParameter): Boolean =
@@ -41,18 +45,19 @@ class CurrentUserIdArgumentResolver(
         if (authentication !is JwtAuthenticationToken) {
             return null
         }
+        (webRequest.getAttribute(RESOLVED_USER_ID_ATTRIBUTE, RequestAttributes.SCOPE_REQUEST) as? ResolvedUserId)
+            ?.takeIf { it.subject == authentication.token.subject }
+            ?.let { return it.userId }
         val publicId = parsePublicIdOrNull(authentication.token.subject) ?: return null
         // 탈퇴(DELETED) 토큰은 여기 오기 전에 DeletedAccountRejectionFilter가 401로 끊는다(KNK-1019).
-        return userRepository.findByPublicId(publicId)?.id
+        return accountAccess.userIdOf(publicId)
     }
 
-    private fun parsePublicIdOrNull(subject: String?): UUID? {
-        // sub가 없는 토큰(subject=null)은 익명으로 본다. UUID.fromString(null)이 NPE를 던지지 않도록 먼저 거른다.
-        if (subject == null) return null
-        return try {
-            UUID.fromString(subject)
-        } catch (_: IllegalArgumentException) {
-            null
-        }
+    companion object {
+        /** 탈퇴 필터가 판정한 회원 PK를 담는 요청 속성 이름. 값은 [ResolvedUserId]이며 서버 코드만 쓴다. */
+        val RESOLVED_USER_ID_ATTRIBUTE: String = CurrentUserIdArgumentResolver::class.java.name + ".RESOLVED_USER_ID"
     }
+
+    /** 탈퇴 필터가 토큰 [subject]를 판정하며 읽은 회원 PK. 리졸버는 subject가 현재 토큰과 같을 때만 쓴다. */
+    data class ResolvedUserId(val subject: String, val userId: Long)
 }

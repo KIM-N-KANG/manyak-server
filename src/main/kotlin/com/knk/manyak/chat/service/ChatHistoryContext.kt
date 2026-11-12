@@ -2,7 +2,7 @@ package com.knk.manyak.chat.service
 
 import com.knk.manyak.chat.client.ChatHistoryMessage
 import com.knk.manyak.chat.client.ChatMessageRole
-import com.knk.manyak.chat.entity.MessageRole
+import com.knk.manyak.chat.dto.MessageRole
 import com.knk.manyak.chat.entity.StoryChatSummary
 import com.knk.manyak.chat.entity.StoryChat
 import com.knk.manyak.chat.entity.StoryMessage

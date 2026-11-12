@@ -54,7 +54,7 @@ interface DevicePushTokenRepository : JpaRepository<DevicePushToken, Long> {
     @Query("DELETE FROM DevicePushToken t WHERE t.token = :token")
     fun deleteByToken(@Param("token") token: String): Int
 
-    /** 탈퇴 정리(UserWithdrawalService). 같은 이유로 조건부 DELETE다. 지운 행 수를 돌려준다. */
+    /** 탈퇴 정리(PushWithdrawalCleanupListener). 같은 이유로 조건부 DELETE다. 지운 행 수를 돌려준다. */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("DELETE FROM DevicePushToken t WHERE t.userId = :userId")
     fun deleteByUserId(@Param("userId") userId: Long): Int

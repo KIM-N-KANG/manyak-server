@@ -1,23 +1,21 @@
 package com.knk.manyak.push.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.push.entity.PushPlatform
+import com.knk.manyak.push.dto.PushPlatform
 import com.knk.manyak.push.repository.DevicePushTokenRepository
 import com.knk.manyak.push.service.DevicePushTokenService
 import com.knk.manyak.support.DatabaseCleaner
-import com.knk.manyak.user.service.UserWithdrawalService
+import com.knk.manyak.support.IntegrationTest
+import com.knk.manyak.auth.service.UserWithdrawalService
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.client.RestTestClient
 
 /**
@@ -28,10 +26,7 @@ import org.springframework.test.web.servlet.client.RestTestClient
  * - 삭제는 토큰을 **본문**으로 받고, 소유자만 지우며 멱등(없어도 204)이다. 탈퇴는 그 회원의 토큰을 전부 지운다.
  * - 정지(SUSPENDED) 계정은 등록·삭제 모두 403이다(스펙 §4-5 B20, Codex P2).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class DevicePushTokenControllerIntegrationTests {
+class DevicePushTokenControllerIntegrationTests : IntegrationTest() {
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository

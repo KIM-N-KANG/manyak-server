@@ -1,6 +1,6 @@
 package com.knk.manyak.image.service
 
-import com.knk.manyak.image.entity.ImagePresetType
+import com.knk.manyak.image.dto.ImagePresetType
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Component
 

@@ -1,7 +1,7 @@
 package com.knk.manyak.story.controller
 
 import com.knk.manyak.auth.entity.User
-import com.knk.manyak.auth.entity.UserStatus
+import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.jwt.JwtTokenProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.image.service.ImageModerationStatus
@@ -12,11 +12,12 @@ import com.knk.manyak.story.entity.StoryCharacter
 import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
 import com.knk.manyak.story.repository.StoryCharacterRepository
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.StoryPublicSnapshotRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -24,12 +25,8 @@ import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mockito.`when`
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
-import org.springframework.test.context.ActiveProfiles
-import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.springframework.test.web.servlet.client.RestTestClient
 import java.time.Duration
 
@@ -41,17 +38,13 @@ import java.time.Duration
  * - 검수 게이트: 노출·AI 전달은 `APPROVED`만이고, 소유자의 편집 폼만 상태와 함께 전부 본다.
  * - 삭제는 DB 참조만 지운다(S3 객체는 남긴다 — 지난 채팅 마커가 깨지지 않게).
  */
-@ActiveProfiles("test")
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@org.springframework.context.annotation.Import(com.knk.manyak.support.SubmissionApprovalTestSupport::class)
-class StoryImageUploadControllerIntegrationTests {
+class StoryImageUploadControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var approvals: com.knk.manyak.support.SubmissionApprovalTestSupport
-    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "storyModerationExecutor")
+    @Autowired @org.springframework.beans.factory.annotation.Qualifier("storyModerationExecutor")
     private lateinit var moderationExecutor: java.util.concurrent.Executor
 
 
-    @MockitoBean private lateinit var uploadedImageStorage: UploadedImageStorage
+    @Autowired private lateinit var uploadedImageStorage: UploadedImageStorage
 
     @Autowired private lateinit var restTestClient: RestTestClient
     @Autowired private lateinit var userRepository: UserRepository
@@ -64,6 +57,7 @@ class StoryImageUploadControllerIntegrationTests {
 
     @BeforeEach
     fun setUp() {
+        com.knk.manyak.support.stopExecuting(moderationExecutor)
         databaseCleaner.cleanAll()
         `when`(uploadedImageStorage.isEnabled()).thenReturn(true)
         `when`(uploadedImageStorage.presignPut(anyString(), anyString(), anyLong(), anyDuration()))
@@ -420,7 +414,7 @@ class StoryImageUploadControllerIntegrationTests {
     @Test
     fun `검수를 통과하지 못한 인물 이미지는 상세에서 빠지고 편집 폼에는 상태와 함께 보인다`() {
         val owner = saveUser()
-        val story = saveStory(owner).apply { visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC }
+        val story = saveStory(owner).apply { visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC }
             .let(storyRepository::save)
         val character = saveCharacter(story)
         storyCharacterImageRepository.save(
@@ -459,7 +453,7 @@ class StoryImageUploadControllerIntegrationTests {
             Story(
                 userId = owner.id,
                 title = "검수 대기 표지",
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
                 thumbnailImageKey = "thumb_0001",
                 thumbnailImageUrl = "$BASE_URL/thumbnails/uploaded/old.webp",
                 thumbnailModerationStatus = ImageModerationStatus.PENDING,
@@ -487,7 +481,7 @@ class StoryImageUploadControllerIntegrationTests {
             Story(
                 userId = owner.id,
                 title = "검수 대기 표지",
-                visibility = com.knk.manyak.story.entity.StoryVisibility.PUBLIC,
+                visibility = com.knk.manyak.story.dto.StoryVisibility.PUBLIC,
                 thumbnailImageKey = "thumb_0001",
                 thumbnailImageUrl = "$BASE_URL/thumbnails/uploaded/pending.webp",
                 thumbnailModerationStatus = ImageModerationStatus.PENDING,

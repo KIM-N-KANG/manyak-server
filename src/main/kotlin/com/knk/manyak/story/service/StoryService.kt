@@ -1,11 +1,11 @@
 package com.knk.manyak.story.service
 
-import com.knk.manyak.search.event.StoryIndexRequestedEvent
-import com.knk.manyak.auth.repository.UserRepository
-import com.knk.manyak.chat.repository.StoryChatRepository
-import com.knk.manyak.global.security.SuspensionGuard
+import com.knk.manyak.global.util.parsePublicIdOrNull
+import com.knk.manyak.story.event.StoryIndexRequestedEvent
+import com.knk.manyak.auth.service.AccountQueryService
+import com.knk.manyak.auth.security.SuspensionGuard
 import com.knk.manyak.global.security.isOwnerAccessAllowed
-import com.knk.manyak.image.entity.ImagePresetType
+import com.knk.manyak.image.dto.ImagePresetType
 import com.knk.manyak.image.service.ImageModeration
 import com.knk.manyak.image.service.ImageUrlResolver
 import com.knk.manyak.story.dto.BatchStoryRequest
@@ -22,7 +22,7 @@ import com.knk.manyak.story.entity.Lorebook
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCharacterImage
 import com.knk.manyak.story.entity.StoryReport
-import com.knk.manyak.story.entity.StoryReportReason
+import com.knk.manyak.story.dto.StoryReportReason
 import com.knk.manyak.story.entity.StoryLorebook
 import com.knk.manyak.story.repository.LorebookRepository
 import com.knk.manyak.story.repository.StoryCharacterImageRepository
@@ -33,8 +33,8 @@ import com.knk.manyak.story.repository.StoryLorebookRepository
 import com.knk.manyak.story.repository.StoryMainEventRepository
 import com.knk.manyak.story.repository.StoryRepository
 import com.knk.manyak.story.service.StoryListSort.Companion.POPULAR_LIKE_WEIGHT
-import com.knk.manyak.story.entity.StoryStatus
-import com.knk.manyak.story.entity.StoryVisibility
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import com.knk.manyak.story.report.StoryReportedEvent
 import org.springframework.context.ApplicationEventPublisher
@@ -46,7 +46,6 @@ import org.springframework.transaction.annotation.Isolation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
-import java.util.UUID
 
 @Service
 class StoryService(
@@ -65,9 +64,9 @@ class StoryService(
     // 인물 대표 이미지의 정본(KNK-1126, V76). 옛 story_characters.image_url은 읽지 않는다.
     private val storyCharacterImageRepository: StoryCharacterImageRepository,
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
-    private val storyChatRepository: StoryChatRepository,
+    private val storyTurnCounts: StoryTurnCounts,
     private val imageUrlResolver: ImageUrlResolver,
-    private val userRepository: UserRepository,
+    private val accounts: AccountQueryService,
     private val officialStoryAccount: OfficialStoryAccount,
     private val authorResolver: StoryAuthorResolver,
     private val exploreSeedSource: StoryExploreSeedSource,
@@ -133,7 +132,7 @@ class StoryService(
      * 공개 스토리 목록(KNK-149). 노출 조건은 발행(PUBLISHED)·공개(PUBLIC)·미삭제·**회원 소유** 넷을 모두
      * 만족하는 스토리다. 게스트(소유자 없음) 스토리는 작성자 신원이 없어 카드에 작성자를 표기할 수 없고
      * 좋아요·신고 같은 소셜 기능의 책임 주체가 없어 싣지 않는다. 간편 제작은 게스트도 PRIVATE으로
-     * 저장되므로([SimpleStoryCreationService], KNK-464) 실제로 걸러지는 것은 일반 제작에서 PUBLIC을 지정한
+     * 저장되므로([SimpleStoryCompletionService], KNK-464) 실제로 걸러지는 것은 일반 제작에서 PUBLIC을 지정한
      * 게스트 스토리와 향후 경로다. 게스트가 로그인해 이관하면 회원 소유가 되어 자연히 노출된다.
      * 요청자 신원을 쓰지 않는 공개 목록이라 비로그인도 같은 결과를 본다.
      *
@@ -256,7 +255,7 @@ class StoryService(
             genres = story.toGenreNames(),
             hashtags = emptyList(),
             author = resolveAuthor(story.userId),
-            turnCount = storyChatRepository.sumTurnCountByStoryId(story.id),
+            turnCount = storyTurnCounts.countByStoryId(story.id),
             likeCount = storyLikeRepository.countByStoryId(story.id),
             // 소유 판단은 서버가 내려준다(KNK-1018). 게스트(userId null)는 항상 false — 소유권 게이트(§4-5)와 달리
             // 게스트 스토리의 게스트 요청도 false다(게스트끼리 구분 불가라 메뉴 노출 판단으로 부적합).
@@ -408,13 +407,6 @@ class StoryService(
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
     }
 
-    private fun parsePublicIdOrNull(raw: String): UUID? =
-        try {
-            UUID.fromString(raw)
-        } catch (ignored: IllegalArgumentException) {
-            null
-        }
-
     private fun Lorebook.toListItemResponse(): LorebookListItemResponse =
         LorebookListItemResponse(id = id, name = name, genre = genre)
 
@@ -436,7 +428,7 @@ class StoryService(
     /** 작성자 카드 정보. 내부 PK는 노출하지 않으므로 id는 항상 null이다(IDOR 방지 원칙과 동일 취지). */
     private fun resolveAuthor(userId: Long?): StoryAuthorResponse? =
         userId
-            ?.let { userRepository.findById(it).orElse(null) }
+            ?.let(accounts::profileOf)
             ?.let { StoryAuthorResponse(id = null, nickname = it.nickname, profileImageUrl = it.profileImageUrl) }
 
     /** 스토리 목록을 카드 응답으로 매핑한다. turnCount·author는 한 번의 배치 조회로 채운다(N+1 방지). */
@@ -477,8 +469,7 @@ class StoryService(
         if (isEmpty()) {
             return emptyList()
         }
-        val turnCountByStoryId = storyChatRepository.sumTurnCountByStoryIds(map { it.id })
-            .associate { it.storyId to it.turnCount }
+        val turnCountByStoryId = storyTurnCounts.countByStoryIds(map { it.id })
         val likeCountByStoryId = storyLikeRepository.countByStoryIds(map { it.id })
             .associate { it.storyId to it.likeCount }
         val authorByUserId = authorResolver.resolveAll(mapNotNull { it.userId })

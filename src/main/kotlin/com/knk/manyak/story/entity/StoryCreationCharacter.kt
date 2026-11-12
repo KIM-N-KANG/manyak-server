@@ -1,6 +1,7 @@
 package com.knk.manyak.story.entity
 
 import com.knk.manyak.story.dto.SimpleStoryCharacterGender
+import com.knk.manyak.story.dto.StoryCreationCharacterRole
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -13,11 +14,6 @@ import jakarta.persistence.JoinColumn
 import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 import java.time.Instant
-
-enum class StoryCreationCharacterRole {
-    PROTAGONIST,
-    SUPPORTING_CHARACTER,
-}
 
 @Entity
 @Table(name = "story_creation_characters")

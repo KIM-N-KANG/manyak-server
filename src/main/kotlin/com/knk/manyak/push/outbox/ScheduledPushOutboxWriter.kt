@@ -1,6 +1,6 @@
 package com.knk.manyak.push.outbox
 
-import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.service.AccountQueryService
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -11,7 +11,7 @@ import java.time.Instant
 @Service
 @ConditionalOnProperty(name = ["manyak.push.mode"], havingValue = "remote")
 class ScheduledPushOutboxWriter(
-    private val users: UserRepository,
+    private val accounts: AccountQueryService,
     private val store: PushOutboxStore,
     private val clock: Clock = Clock.systemUTC(),
 ) {
@@ -26,9 +26,10 @@ class ScheduledPushOutboxWriter(
         expiresAtByUserId: Map<Long, Instant> = emptyMap(),
     ): Int {
         val now = clock.instant()
+        // 자격은 소비자가 재확인한다. 여기서는 내부 ID를 공개 식별자로만 변환한다. 대상이 사라졌으면 기록 전에 실패해 회차가 롤백된다.
+        val publicIds = accounts.requirePublicIdsOf(targetIds)
         return targetIds.sumOf { userId ->
-            // 자격은 소비자가 재확인한다. 여기서는 내부 ID를 공개 식별자로만 변환한다.
-            val recipientId = users.findById(userId).orElseThrow().publicId.toString()
+            val recipientId = publicIds.getValue(userId).toString()
             val messageId = when (scenario) {
                 "attendance" -> "attendance:$recipientId:$occurrence"
                 "credit-expiry" -> "credit-expiry:$recipientId:$occurrence"

@@ -1,0 +1,245 @@
+package com.knk.manyak.auth.controller
+
+import com.knk.manyak.auth.entity.SocialAccount
+import com.knk.manyak.auth.dto.SocialProvider
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.dto.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.SocialAccountRepository
+import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.auth.token.RefreshTokenStore
+import com.knk.manyak.auth.token.RotateResult
+import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.dto.StoryStatus
+import com.knk.manyak.story.dto.StoryVisibility
+import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
+import java.time.Duration
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.test.web.servlet.client.RestTestClient
+
+/**
+ * 회원 탈퇴(KNK-1019). soft delete(DELETED) + 개인정보 익명화 + 소셜 연동 tombstone(KNK-1053) + refresh 전체 폐기.
+ * 소유 스토리는 공개 상태를 유지한다(2026-08-30 팀 결정 — 작성자 표기는 익명화된 닉네임이 자연 반영).
+ */
+class UserWithdrawalIntegrationTests : IntegrationTest() {
+
+    @Autowired private lateinit var restTestClient: RestTestClient
+    @Autowired private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var socialAccountRepository: SocialAccountRepository
+    @Autowired private lateinit var storyRepository: StoryRepository
+    @Autowired private lateinit var refreshTokenStore: RefreshTokenStore
+    @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
+    @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+
+    @Autowired private lateinit var drafts: com.knk.manyak.story.draft.StoryDraftRepository
+
+    @Test fun `탈퇴는 내 초안을 물리 삭제하고 타인 초안은 유지한다`() {
+        val owner = saveMember("탈퇴 작가")
+        val other = saveMember("다른 작가")
+        fun draft(user: User) = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), user.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{\"text\":\"미등록 입력\"}"))
+        val mine = draft(owner); val theirs = draft(other)
+        restTestClient.delete().uri("/api/v1/users/me").header("Authorization", "Bearer ${tokenFor(owner)}")
+            .exchange().expectStatus().isNoContent
+        org.junit.jupiter.api.Assertions.assertFalse(drafts.existsById(mine.id))
+        assertTrue(drafts.existsById(theirs.id))
+        assertEquals("{\"text\":\"미등록 입력\"}", drafts.findById(theirs.id).orElseThrow().payload)
+    }
+
+    @Autowired private lateinit var submissions: com.knk.manyak.story.submission.StorySubmissionRepository
+    @Autowired private lateinit var pushTokens: com.knk.manyak.push.repository.DevicePushTokenRepository
+    @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.UserNotificationStore
+
+    @Test fun `탈퇴 정리의 마지막 삭제가 실패하면 앞선 삭제와 계정 변경까지 전부 롤백된다`() {
+        // 마지막 단계(알림 내역 삭제)를 실패시켜, 그 앞의 제출본·초안·푸시 토큰 삭제와 flush된 사용자·소셜 변경이
+        // 모두 한 트랜잭션으로 되돌아가는지 고정한다. 부분 삭제가 남으면 안 된다.
+        val user = saveMember("롤백회원")
+        socialAccountRepository.save(SocialAccount(userId = user.id, provider = SocialProvider.GOOGLE, providerUserId = "rollback-sub", email = "rollback@example.com"))
+        val submission = submissions.save(com.knk.manyak.story.submission.StorySubmission(userId = user.id,
+            kind = com.knk.manyak.story.submission.SubmissionKind.CREATE, payload = "{}"))
+        val draft = drafts.save(com.knk.manyak.story.draft.StoryDraft(java.util.UUID.randomUUID(), user.id,
+            com.knk.manyak.story.draft.StoryDraftMode.GENERAL, com.knk.manyak.story.draft.StoryDraftStage.GENERAL_DRAFT, 1, "{}"))
+        val token = pushTokens.save(com.knk.manyak.push.entity.DevicePushToken(userId = user.id, token = "rollback-token", platform = com.knk.manyak.push.dto.PushPlatform.ANDROID))
+        org.mockito.Mockito.doThrow(org.springframework.dao.TransientDataAccessResourceException("inbox unavailable"))
+            .`when`(org.springframework.test.util.AopTestUtils.getUltimateTargetObject<com.knk.manyak.push.inbox.UserNotificationStore>(notifications))
+            .deleteForUser(user.id)
+
+        restTestClient.delete().uri("/api/v1/users/me").header("Authorization", "Bearer ${tokenFor(user)}")
+            .exchange().expectStatus().is5xxServerError
+
+        val reloaded = userRepository.findById(user.id).orElseThrow()
+        assertEquals(UserStatus.ACTIVE, reloaded.status)
+        assertEquals("롤백회원", reloaded.nickname)
+        assertEquals("rollback@example.com", socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "rollback-sub")!!.email)
+        assertTrue(submissions.existsById(submission.id))
+        assertTrue(drafts.existsById(draft.id))
+        assertTrue(pushTokens.existsById(token.id))
+    }
+
+    @Autowired private lateinit var jdbc: org.springframework.jdbc.core.JdbcTemplate
+
+    @Test fun `탈퇴는 제출본을 지운 뒤에 알림 내역을 지운다`() {
+        // NOTIFICATION 4-1-19 "탈퇴와의 순서"가 적어 둔 삭제 순서(제출본 다음 알림 내역)를 고정한다. 검수 완료 알림 기록과
+        // 겹칠 때 회원 행 잠금(MODERATION 5-2-1)에 이은 2차 방어다. 리스너 @Order가 뒤집히면 이 테스트가 실패한다.
+        val user = saveMember("순서회원")
+        submissions.save(com.knk.manyak.story.submission.StorySubmission(userId = user.id,
+            kind = com.knk.manyak.story.submission.SubmissionKind.CREATE, payload = "{}"))
+        val submissionsLeftAtInboxDeletion = mutableListOf<Long>()
+        org.mockito.Mockito.doAnswer { call ->
+            // 탈퇴 트랜잭션의 커넥션으로 읽으므로 커밋 전 삭제가 보인다.
+            submissionsLeftAtInboxDeletion += jdbc.queryForObject("SELECT count(*) FROM story_submissions WHERE user_id = ?", Long::class.java, user.id)!!
+            call.callRealMethod()
+        }.`when`(org.springframework.test.util.AopTestUtils.getUltimateTargetObject<com.knk.manyak.push.inbox.UserNotificationStore>(notifications))
+            .deleteForUser(user.id)
+
+        restTestClient.delete().uri("/api/v1/users/me").header("Authorization", "Bearer ${tokenFor(user)}")
+            .exchange().expectStatus().isNoContent
+
+        assertEquals(listOf(0L), submissionsLeftAtInboxDeletion)
+    }
+
+    @BeforeEach
+    fun setUp() {
+        databaseCleaner.cleanAll()
+    }
+
+    private fun saveMember(nickname: String = "탈퇴예정자"): User =
+        userRepository.save(User(nickname = nickname, profileImageUrl = "https://example.com/p.png", status = UserStatus.ACTIVE))
+
+    private fun tokenFor(user: User): String = jwtTokenProvider.issueAccessToken(user.publicId)
+
+    @Test
+    fun `두 회원이 연속 탈퇴하면 모두 204이고 같은 익명화 닉네임을 갖는다`() {
+        val users = listOf(saveMember("첫번째회원"), saveMember("두번째회원"))
+        users.forEach { user ->
+            restTestClient.delete().uri("/api/v1/users/me")
+                .header("Authorization", "Bearer ${tokenFor(user)}")
+                .exchange().expectStatus().isNoContent
+        }
+        users.forEach { user ->
+            val withdrawn = userRepository.findById(user.id).orElseThrow()
+            assertEquals(UserStatus.DELETED, withdrawn.status)
+            assertEquals(com.knk.manyak.auth.service.UserWithdrawalService.ANONYMIZED_NICKNAME, withdrawn.nickname)
+        }
+    }
+
+    @Test
+    fun `탈퇴하면 DELETED 전환과 함께 개인정보가 익명화되고 소셜 연동·refresh가 폐기된다`() {
+        val user = saveMember()
+        socialAccountRepository.save(
+            SocialAccount(
+                userId = user.id,
+                provider = SocialProvider.GOOGLE,
+                providerUserId = "google-sub-1",
+                email = "user@example.com",
+            ),
+        )
+        refreshTokenStore.createFamily("refresh-hash-1", user.id, Duration.ofHours(1))
+
+        restTestClient.delete().uri("/api/v1/users/me")
+            .header("Authorization", "Bearer ${tokenFor(user)}")
+            .exchange()
+            .expectStatus().isNoContent
+
+        val reloaded = userRepository.findById(user.id).get()
+        assertEquals(UserStatus.DELETED, reloaded.status)
+        org.junit.jupiter.api.Assertions.assertNotNull(reloaded.deletedAt)
+        assertEquals("탈퇴한 사용자", reloaded.nickname)
+        assertNull(reloaded.profileImageUrl)
+        assertNull(reloaded.profileThumbnailBase64)
+        // 소셜 행은 지우지 않고 tombstone으로 남긴다(KNK-1053 — 재가입이 이 행을 재사용해야 1회성 혜택이 리셋되지 않는다).
+        // 개인정보 파기는 email NULL로 충족하고, provider_user_id는 재가입 매칭 키라 남긴다.
+        val tombstone = socialAccountRepository.findByProviderAndProviderUserId(SocialProvider.GOOGLE, "google-sub-1")
+        org.junit.jupiter.api.Assertions.assertNotNull(tombstone!!.deletedAt)
+        assertNull(tombstone.email)
+        assertEquals(user.id, tombstone.userId)
+        // refresh family 전체 폐기 — 남은 토큰으로 회전하면 Invalid다.
+        assertTrue(refreshTokenStore.rotate("refresh-hash-1", "new-hash", "new-raw", Duration.ofHours(1), Duration.ZERO) is RotateResult.Invalid)
+    }
+
+    @Test
+    fun `탈퇴 후 만료 전 access 토큰의 쓰기 요청은 401이다`() {
+        val user = saveMember()
+        val story = storyRepository.save(
+            Story(title = "탈퇴자 공개 스토리", userId = user.id, visibility = StoryVisibility.PUBLIC, status = StoryStatus.PUBLISHED),
+        )
+        val token = tokenFor(user)
+
+        restTestClient.delete().uri("/api/v1/users/me")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isNoContent
+
+        // 잔여 access 토큰의 쓰기 경로는 공통 게이트가 401로 막는다(§4-5 B20 확장).
+        restTestClient.post().uri("/api/v1/stories/${story.publicId}/like")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
+    }
+
+    @Test
+    fun `탈퇴해도 공개 스토리는 유지되고 작성자는 익명화된 닉네임으로 보인다`() {
+        val user = saveMember(nickname = "원래닉네임")
+        val story = storyRepository.save(
+            Story(title = "남는 공개 스토리", userId = user.id, visibility = StoryVisibility.PUBLIC, status = StoryStatus.PUBLISHED),
+        )
+
+        restTestClient.delete().uri("/api/v1/users/me")
+            .header("Authorization", "Bearer ${tokenFor(user)}")
+            .exchange().expectStatus().isNoContent
+
+        // 공개 상태 유지(팀 결정) — 게스트도 계속 읽을 수 있고, author는 익명화된 닉네임이다.
+        restTestClient.get().uri("/api/v1/stories/${story.publicId}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.author.nickname").isEqualTo("탈퇴한 사용자")
+            .jsonPath("$.visibility").isEqualTo("PUBLIC")
+    }
+
+    @Test
+    fun `탈퇴한 계정의 잔여 access 토큰은 전면 401이다(재탈퇴·무가드 쓰기 경로 포함)`() {
+        // 탈퇴 후 잔여 토큰은 해석 계층(CurrentUserIdArgumentResolver)에서 전면 무효다(KNK-1019 Codex P1).
+        // SuspensionGuard를 거치지 않는 인증 쓰기 경로(출석 크레딧 등)까지 한 번에 닫힌다.
+        val user = saveMember()
+        val token = tokenFor(user)
+
+        restTestClient.delete().uri("/api/v1/users/me")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isNoContent
+
+        restTestClient.delete().uri("/api/v1/users/me")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
+
+        restTestClient.post().uri("/api/v1/users/me/credits/attendance")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
+
+        // 리졸버를 우회해 Jwt를 직접 소비하는 auth/me도 같은 계약이다(KNK-1019 Codex P1).
+        restTestClient.get().uri("/api/v1/auth/me")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
+
+        // @CurrentUserId를 아예 안 쓰는 공개 조회(optional 인증)도 필터가 같은 계약을 집행한다(4차 P2).
+        restTestClient.get().uri("/api/v1/stories/00000000-0000-0000-0000-000000000000")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
+
+        // 이프 수치 조회도 마찬가지다(KNK-1090). BEARER_SKIP에 두면 토큰을 resolve하지 않아 이 경로만 새어나간다.
+        restTestClient.get().uri("/api/v1/credits/policies")
+            .header("Authorization", "Bearer $token")
+            .exchange().expectStatus().isUnauthorized
+    }
+
+    @Test
+    fun `미인증 탈퇴 요청은 401이다`() {
+        restTestClient.delete().uri("/api/v1/users/me")
+            .exchange().expectStatus().isUnauthorized
+    }
+}

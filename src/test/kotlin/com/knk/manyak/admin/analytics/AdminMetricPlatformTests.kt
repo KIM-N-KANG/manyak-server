@@ -33,7 +33,7 @@ class AdminMetricPlatformTests {
         override fun turnsByModel(range: AnalyticsRange, excluded: List<Long>) = emptyList<Map<String, Any?>>()
         override fun modelCodes() = models
     }
-    private fun service(f: AnalyticsTestFixture = fixture) = AdminMetricReadService(repository, AdminDashboardProperties(), MetricDefinitions(AnalyticsQueryFactory(f.mapper), f.mapper), f.snapshots, f.clock)
+    private fun service(f: AnalyticsTestFixture = fixture, dashboard: AdminDashboardProperties = AdminDashboardProperties()) = AdminMetricReadService(repository, dashboard, MetricDefinitions(AnalyticsQueryFactory(f.mapper), f.mapper), f.snapshots, f.clock)
     private fun filters(e: JsonNode) = e["filters"].toList().associate { it["subprop_key"].asText() to it["subprop_op"].asText() + ":" + it["subprop_value"].toList().joinToString(",") { v -> v.asText() } }
     private fun event(r: RecordedRequest) = fixture.mapper.readTree(r.requestUrl!!.queryParameter("e")!!)
     @BeforeEach fun setup() {
@@ -91,23 +91,28 @@ class AdminMetricPlatformTests {
     }
 
     @Test fun `플랫폼 조회가 5초를 넘기면 받은 값만 저장하고 DB 값은 바로 주며 그 키는 쿨다운이다`(output: CapturedOutput) {
+        // 운영 예산 5초·지연 2초를 같은 비율(2초·800ms)로 줄인다. 저장 개수 경계 여유는 양쪽 400ms다. 기본값 5초는 아래 기본값 테스트가 지킨다(KNK-2058).
+        val budget = AdminDashboardProperties(platformTimeout = java.time.Duration.ofSeconds(2))
         val delegate = server.dispatcher
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = delegate.dispatch(r).setHeadersDelay(2, java.util.concurrent.TimeUnit.SECONDS) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = delegate.dispatch(r).setHeadersDelay(800, java.util.concurrent.TimeUnit.MILLISECONDS) }
         fun timed(call: () -> Unit) { val started = System.nanoTime(); call(); assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(java.time.Duration.ofMillis(5800)) }
         val day = com.knk.manyak.admin.dto.AdminChartsRequest().apply { from = "2026-10-23"; to = "2026-10-23" }
         lateinit var signup: SignupResponse
-        timed { signup = service().signups(day) }
+        timed { signup = service(dashboard = budget).signups(day) }
         assertThat(signup.daily.single().signups.total).isEqualTo(2); assertThat(signup.daily.single().signupsByPlatform).isNull()
         assertThat(signup.pendingDates).containsExactly(LocalDate.parse("2026-10-23"))
         assertThat(output.out).contains("admin_analytics_fetch_failed reason=timeout")
         val stored = MetricDefinitions(AnalyticsQueryFactory(fixture.mapper), fixture.mapper).signupPlatforms().count { fixture.store.daily(it.definition, LocalDate.parse("2026-10-23"), LocalDate.parse("2026-10-23")).isNotEmpty() }
         assertThat(stored).isEqualTo(2)
         val sent = server.requestCount
-        timed { assertThat(service().signups(day).pendingDates).hasSize(1) }
+        timed { assertThat(service(dashboard = budget).signups(day).pendingDates).hasSize(1) }
         assertThat(server.requestCount).isEqualTo(sent) // 60초 쿨다운
         val q = request("2026-10-23", "2026-10-23")
-        timed { val r = service().reach(q); assertThat(r.platforms).isNull(); assertThat(r.pendingDates).hasSize(1); assertThat(r.segments).hasSize(3) }
-        timed { val r = service().options(q); assertThat(r.daily.single().chatStarters).isNull(); assertThat(r.pendingDates).hasSize(1) }
+        timed { val r = service(dashboard = budget).reach(q); assertThat(r.platforms).isNull(); assertThat(r.pendingDates).hasSize(1); assertThat(r.segments).hasSize(3) }
+        timed { val r = service(dashboard = budget).options(q); assertThat(r.daily.single().chatStarters).isNull(); assertThat(r.pendingDates).hasSize(1) }
+    }
+    @Test fun `플랫폼 조회 예산 기본값은 5초다`() {
+        assertThat(AdminDashboardProperties().platformTimeout).isEqualTo(java.time.Duration.ofSeconds(5))
     }
 
     @Test fun `턴 도달률 플랫폼은 재생성 아닌 성공 이벤트의 기준 턴 합계 36회다`() {
@@ -119,7 +124,7 @@ class AdminMetricPlatformTests {
             assertThat(f).containsEntry("is_regenerated", "is:false").containsKeys("country", "platform").doesNotContainKey("user_id")
             assertThat(e["filters"].toList().single { it["subprop_key"].asText() == "turn_number" }["subprop_value"][0].isString).isTrue()
         }
-        assertThat(requests.map { filters(event(it))["turn_number"] }.toSet()).containsExactlyInAnyOrderElementsOf(com.knk.manyak.admin.repository.AdminQuery.turnReachThresholds.map { "is:$it" })
+        assertThat(requests.map { filters(event(it))["turn_number"] }.toSet()).containsExactlyInAnyOrderElementsOf(com.knk.manyak.adminkit.query.AdminQuery.turnReachThresholds.map { "is:$it" })
         assertThat(service().reach(request("2026-10-17", "2026-10-23")).segment).isEqualTo("all")
     }
 
@@ -143,7 +148,7 @@ class AdminMetricPlatformTests {
         assertThat(platforms.getValue("web").chats).isEqualTo(10); assertThat(platforms.getValue("web").reached.single { it.turn == 5 }.rate).isEqualTo(0.4)
         assertThat(platforms.getValue("web").reached.single { it.turn == 50 }.chats).isZero()
         assertThat(platforms.getValue("all").chats).isEqualTo(30); assertThat(platforms.getValue("all").reached.single { it.turn == 5 }.chats).isEqualTo(14)
-        assertThat(platforms.values).allMatch { p -> p.reached.map { it.turn } == com.knk.manyak.admin.repository.AdminQuery.turnReachThresholds }
+        assertThat(platforms.values).allMatch { p -> p.reached.map { it.turn } == com.knk.manyak.adminkit.query.AdminQuery.turnReachThresholds }
     }
 
     @Test fun `범위 전에 시작한 채팅이 있으면 플랫폼 도달 비율은 1을 넘는다`() {

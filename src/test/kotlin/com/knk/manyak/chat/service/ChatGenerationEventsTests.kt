@@ -17,7 +17,12 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 class ChatGenerationEventsTests {
-    private fun withRedis(test: (StringRedisTemplate, ChatGenerationStore, ChatGenerationEvents) -> Unit) {
+    private companion object {
+        /** 운영 기본 5초 대신 짧은 BLOCK으로 같은 "빈 XREAD 뒤 키 확인" 경로를 탄다(KNK-2058). */
+        val READ_WAIT: Duration = Duration.ofMillis(500)
+    }
+
+    private fun withRedis(readWait: Duration = READ_WAIT, test: (StringRedisTemplate, ChatGenerationStore, ChatGenerationEvents) -> Unit) {
         val factory = LettuceConnectionFactory(
             org.springframework.data.redis.connection.RedisStandaloneConfiguration("localhost", System.getProperty("spring.data.redis.port").toInt()),
             org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration.builder().commandTimeout(Duration.ofSeconds(2)).build(),
@@ -26,7 +31,7 @@ class ChatGenerationEventsTests {
         try {
             val redis = StringRedisTemplate(factory)
             val mapper = jacksonObjectMapper()
-            val events = ChatGenerationEvents(redis, mapper, StructuredLogger())
+            val events = ChatGenerationEvents(redis, mapper, StructuredLogger(), readWait)
             try { test(redis, ChatGenerationStore(redis, mapper), events) } finally { events.destroy() }
         } finally { factory.destroy() }
     }
@@ -49,7 +54,10 @@ class ChatGenerationEventsTests {
         assertThat(redis.getExpire(key)).isBetween(298, 300)
     }
 
-    @Test fun `큐 대기 중 스트림 없는 첫 연결과 상세 직후 재연결은 기다리며 공유 Redis 명령을 막지 않는다`() = withRedis { redis, store, events ->
+    @Test fun `큐 대기 중 스트림 없는 첫 연결과 상세 직후 재연결은 기다리며 공유 Redis 명령을 막지 않는다`() =
+        // 공유 명령이 끝난 뒤에도 "같은 XREAD가 아직 BLOCK 중"임을 보므로, BLOCK이 중간에 끝나지 않게 운영 기본값을 쓴다.
+        // 이 테스트는 error 이벤트로 바로 끝나 BLOCK 시간을 기다리지 않는다.
+        withRedis(Duration.ofSeconds(ChatGenerationEvents.READ_WAIT_SECONDS)) { redis, store, events ->
         val chat = UUID.randomUUID().toString()
         val generation = store.acquire(chat, "CONTINUE", "입력", Instant.now(), null)
         val received = java.util.Collections.synchronizedList(mutableListOf<String>())
@@ -111,7 +119,7 @@ class ChatGenerationEventsTests {
         val generation = store.acquire(chat, "CONTINUE", "입력", Instant.now(), null)
         val spy = Mockito.spy(redis)
         val values = Mockito.spy(redis.opsForValue())
-        val events = ChatGenerationEvents(spy, jacksonObjectMapper(), StructuredLogger())
+        val events = ChatGenerationEvents(spy, jacksonObjectMapper(), StructuredLogger(), READ_WAIT)
         try {
             val writer = events.writer(chat, generation.generationId, generation.startedAt)
             writer.write("started", mapOf("generationId" to generation.generationId))
@@ -184,7 +192,7 @@ class ChatGenerationEventsTests {
             result
         }.`when`(values).get("chat:$chat:generating")
         org.mockito.Mockito.doReturn(values).`when`(spy).opsForValue()
-        val events = ChatGenerationEvents(spy, jacksonObjectMapper(), StructuredLogger())
+        val events = ChatGenerationEvents(spy, jacksonObjectMapper(), StructuredLogger(), READ_WAIT)
         try {
             events.writer(chat, generation.generationId, generation.startedAt).write("started", emptyMap<String, String>())
             val received = java.util.Collections.synchronizedList(mutableListOf<String>())
@@ -255,7 +263,7 @@ class ChatGenerationEventsTests {
             Mockito.any<RedisScript<Long>>(), Mockito.anyList(),
             Mockito.anyString(), Mockito.anyString(), Mockito.anyString(), Mockito.anyString(),
         )
-        val events = ChatGenerationEvents(lostReply, jacksonObjectMapper(), StructuredLogger())
+        val events = ChatGenerationEvents(lostReply, jacksonObjectMapper(), StructuredLogger(), READ_WAIT)
         try {
             val chat = UUID.randomUUID().toString()
             val id = UUID.randomUUID().toString()
@@ -286,7 +294,7 @@ class ChatGenerationEventsTests {
             Mockito.any<RedisScript<Long>>(), Mockito.anyList(),
             Mockito.anyString(), Mockito.anyString(), Mockito.anyString(), Mockito.anyString(),
         )
-        val events = ChatGenerationEvents(failedFirst, jacksonObjectMapper(), StructuredLogger())
+        val events = ChatGenerationEvents(failedFirst, jacksonObjectMapper(), StructuredLogger(), READ_WAIT)
         try {
             val chat = UUID.randomUUID().toString()
             val id = UUID.randomUUID().toString()

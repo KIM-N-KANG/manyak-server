@@ -2,19 +2,19 @@ package com.knk.manyak.push.delivery
 
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.entity.SocialAccount
-import com.knk.manyak.auth.entity.SocialProvider
+import com.knk.manyak.auth.dto.SocialProvider
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.repository.SocialAccountRepository
 import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.push.entity.PushCampaign
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient
-import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.client.RestTestClient
@@ -22,10 +22,7 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
-@AutoConfigureRestTestClient
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = ["manyak.internal.shared-secret=delivery-test-secret"])
-class PushDeliveryIntegrationTests {
+class PushDeliveryIntegrationTests : IntegrationTest() {
     @Autowired lateinit var client: RestTestClient
     @Autowired lateinit var jdbc: JdbcTemplate
     @Autowired lateinit var cleaner: DatabaseCleaner
@@ -51,7 +48,7 @@ class PushDeliveryIntegrationTests {
         "recipientId" to recipient, "campaignId" to campaign, "outcome" to outcome, "reason" to "TEST",
         "deliveredDevices" to delivered, "failedDevices" to failed, "completedAt" to at)
 
-    private fun report(body: Any, secret: String? = "delivery-test-secret"): RestTestClient.ResponseSpec {
+    private fun report(body: Any, secret: String? = IntegrationTest.INTERNAL_SHARED_SECRET): RestTestClient.ResponseSpec {
         val req = client.post().uri("/internal/push-deliveries").contentType(MediaType.APPLICATION_JSON)
         secret?.let { req.header("X-Manyak-Internal-Secret", it) }
         return req.body(body).exchange()
@@ -172,9 +169,9 @@ class PushDeliveryIntegrationTests {
     }
 
     @Test fun `로컬 완성 리스너는 메시지 ID와 FCM 미설정 폐기 결과를 기록한다`() {
-        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, users,
+        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, AccountQueryService(users),
             io.micrometer.core.instrument.simple.SimpleMeterRegistry(), deliveries = deliveries)
-        val listener = com.knk.manyak.push.event.StoryCompletionPushListener(users, sender, java.util.concurrent.Executor { it.run() })
+        val listener = com.knk.manyak.push.event.StoryCompletionPushListener(AccountQueryService(users), sender, java.util.concurrent.Executor { it.run() })
         val requestId = UUID.randomUUID()
         listener.onStoryCompleted(com.knk.manyak.story.event.StoryCompletedEvent(user.id, requestId, UUID.randomUUID().toString(), "완성"))
         val row = jdbc.queryForMap("SELECT * FROM push_delivery_results")
@@ -184,10 +181,10 @@ class PushDeliveryIntegrationTests {
 
     @Test fun `로컬 발송은 무효 토큰을 실패 기기에서 빼고 부분 성공을 기록한다`() {
         val messaging = org.mockito.Mockito.mock(com.google.firebase.messaging.FirebaseMessaging::class.java)
-        val sender = com.knk.manyak.push.service.FcmPushSender(messaging, tokens, users,
+        val sender = com.knk.manyak.push.service.FcmPushSender(messaging, tokens, AccountQueryService(users),
             io.micrometer.core.instrument.simple.SimpleMeterRegistry(), deliveries = deliveries)
         repeat(3) { tokens.save(com.knk.manyak.push.entity.DevicePushToken(userId = user.id,
-            token = "local-$it", platform = com.knk.manyak.push.entity.PushPlatform.ANDROID)) }
+            token = "local-$it", platform = com.knk.manyak.push.dto.PushPlatform.ANDROID)) }
         val invalid = org.mockito.Mockito.mock(com.google.firebase.messaging.FirebaseMessagingException::class.java)
         org.mockito.Mockito.`when`(invalid.messagingErrorCode).thenReturn(com.google.firebase.messaging.MessagingErrorCode.UNREGISTERED)
         org.mockito.Mockito.`when`(messaging.send(org.mockito.ArgumentMatchers.any())).thenReturn("accepted")
@@ -201,9 +198,9 @@ class PushDeliveryIntegrationTests {
     @Test fun `로컬 자격 거절과 만료는 발송 없이 폐기로 기록한다`() {
         user.servicePushEnabled = false
         users.saveAndFlush(user)
-        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, users,
+        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, AccountQueryService(users),
             io.micrometer.core.instrument.simple.SimpleMeterRegistry(), deliveries = deliveries)
-        val listener = com.knk.manyak.push.event.StoryCompletionPushListener(users, sender, java.util.concurrent.Executor { it.run() })
+        val listener = com.knk.manyak.push.event.StoryCompletionPushListener(AccountQueryService(users), sender, java.util.concurrent.Executor { it.run() })
         listener.onStoryCompleted(com.knk.manyak.story.event.StoryCompletedEvent(user.id, UUID.randomUUID(), UUID.randomUUID().toString(), "완성"))
         sender.sendToUser(user.id, mapOf("type" to "ATTENDANCE_REMINDER"),
             expiresAt = Instant.EPOCH, messageId = "expired-local")
@@ -220,7 +217,7 @@ class PushDeliveryIntegrationTests {
                 ?: com.knk.manyak.push.dto.PushDeliveryReportRequest("matcher", com.knk.manyak.push.dto.PushDeliveryType.STORY_COMPLETED,
                     com.knk.manyak.push.dto.PushKind.SERVICE, user.publicId, outcome = com.knk.manyak.push.dto.PushDeliveryOutcome.DISCARDED,
                     reason = "TEST", deliveredDevices = 0, failedDevices = 0, completedAt = Instant.now()))
-        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, users,
+        val sender = com.knk.manyak.push.service.FcmPushSender(null, tokens, AccountQueryService(users),
             io.micrometer.core.instrument.simple.SimpleMeterRegistry(), deliveries = recording)
         org.assertj.core.api.Assertions.assertThatCode {
             sender.sendToUser(user.id, mapOf("type" to "STORY_COMPLETED"), messageId = "record-failure")

@@ -1,0 +1,142 @@
+package com.knk.manyak.story.controller
+
+import com.knk.manyak.auth.entity.User
+import com.knk.manyak.auth.dto.UserStatus
+import com.knk.manyak.auth.jwt.JwtTokenProvider
+import com.knk.manyak.auth.repository.UserRepository
+import com.knk.manyak.chat.entity.StoryChat
+import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.story.entity.Story
+import com.knk.manyak.story.dto.StoryVisibility
+import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.support.DatabaseCleaner
+import com.knk.manyak.support.IntegrationTest
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.test.web.servlet.client.RestTestClient
+import java.time.Instant
+
+/**
+ * GET /api/v1/users/me/stories 통합 검증(회원 서재, KNK-447).
+ *
+ * - 인증 필수: 토큰 없음·사용자 없음 → 401.
+ * - 요청자 소유만, 소프트 삭제 제외, 생성 최신순, limit 상한.
+ */
+class MyStoryControllerIntegrationTests : IntegrationTest() {
+
+    @Autowired private lateinit var restTestClient: RestTestClient
+    @Autowired private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var jwtTokenProvider: JwtTokenProvider
+    @Autowired private lateinit var storyRepository: StoryRepository
+    @Autowired private lateinit var storyChatRepository: StoryChatRepository
+    @Autowired private lateinit var databaseCleaner: DatabaseCleaner
+
+    @BeforeEach
+    fun setUp() {
+        databaseCleaner.cleanAll()
+    }
+
+    private fun saveUser(nickname: String): User =
+        userRepository.save(User(nickname = nickname, status = UserStatus.ACTIVE))
+
+    private fun accessTokenFor(user: User): String = jwtTokenProvider.issueAccessToken(user.publicId)
+
+    private val t1: Instant = Instant.parse("2026-01-01T00:00:00Z")
+    private val t2: Instant = Instant.parse("2026-02-01T00:00:00Z")
+
+    // ---- 인증 ----
+
+    @Test
+    fun `토큰 없이 내 스토리 목록을 호출하면 401이다`() {
+        restTestClient.get().uri("/api/v1/users/me/stories").exchange().expectStatus().isUnauthorized
+    }
+
+    // ---- 내 스토리 목록 ----
+
+    @Test
+    fun `내 스토리 목록은 요청자 소유·미삭제만 생성 최신순으로 반환한다`() {
+        val me = saveUser("me")
+        val other = saveUser("other")
+        storyRepository.save(Story(userId = me.id, title = "old", createdAt = t1))
+        storyRepository.save(Story(userId = me.id, title = "new", createdAt = t2))
+        storyRepository.save(Story(userId = other.id, title = "other"))
+        storyRepository.save(Story(userId = null, title = "guest"))
+        storyRepository.save(Story(userId = me.id, title = "deleted", createdAt = t2, deletedAt = Instant.now()))
+
+        restTestClient.get()
+            .uri("/api/v1/users/me/stories")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(2)
+            .jsonPath("$[0].title").isEqualTo("new")
+            .jsonPath("$[1].title").isEqualTo("old")
+            .jsonPath("$[0].isOriginal").isEqualTo(false)
+            .jsonPath("$[1].isOriginal").isEqualTo(false)
+    }
+
+    @Test
+    fun `내 스토리 목록은 공개와 비공개 스토리의 공개 범위를 반환한다`() {
+        val me = saveUser("me")
+        val publicStory = storyRepository.save(
+            Story(userId = me.id, title = "공개 스토리", visibility = StoryVisibility.PUBLIC, createdAt = t1),
+        )
+        val privateStory = storyRepository.save(
+            Story(userId = me.id, title = "비공개 스토리", visibility = StoryVisibility.PRIVATE, createdAt = t2),
+        )
+
+        restTestClient.get()
+            .uri("/api/v1/users/me/stories")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(2)
+            .jsonPath("$[0].id").isEqualTo(privateStory.publicId.toString())
+            .jsonPath("$[0].visibility").isEqualTo("PRIVATE")
+            .jsonPath("$[1].id").isEqualTo(publicStory.publicId.toString())
+            .jsonPath("$[1].visibility").isEqualTo("PUBLIC")
+    }
+
+    @Test
+    fun `내 스토리 목록은 limit으로 개수를 제한한다`() {
+        val me = saveUser("me")
+        repeat(3) { storyRepository.save(Story(userId = me.id, title = "s$it")) }
+
+        restTestClient.get()
+            .uri("/api/v1/users/me/stories?limit=2")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}")
+            .exchange()
+            .expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.length()").isEqualTo(2)
+    }
+
+    @Test
+    fun `내 스토리 카드의 누적 턴 수는 삭제된 채팅과 재생성을 포함한다`() {
+        val me = saveUser("me")
+        val story = storyRepository.save(Story(userId = me.id, title = "누적 턴"))
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 3))
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 2, regeneratedCount = 1))
+        storyChatRepository.save(StoryChat(storyId = story.id, currentTurn = 4, deletedAt = Instant.now()))
+
+        restTestClient.get().uri("/api/v1/users/me/stories")
+            .header("Authorization", "Bearer ${accessTokenFor(me)}")
+            .exchange().expectStatus().isOk.expectBody()
+            .jsonPath("$[0].id").isEqualTo(story.publicId.toString())
+            .jsonPath("$[0].turnCount").isEqualTo(10)
+    }
+
+    @Test
+    fun `유효한 토큰이지만 사용자가 없으면 401이다`() {
+        val token = jwtTokenProvider.issueAccessToken(java.util.UUID.randomUUID())
+
+        restTestClient.get()
+            .uri("/api/v1/users/me/stories")
+            .header("Authorization", "Bearer $token")
+            .exchange()
+            .expectStatus().isUnauthorized
+    }
+}

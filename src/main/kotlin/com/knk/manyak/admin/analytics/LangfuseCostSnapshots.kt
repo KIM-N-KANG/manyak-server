@@ -1,6 +1,6 @@
 package com.knk.manyak.admin.analytics
 
-import com.knk.manyak.admin.dto.AdminDateRange
+import com.knk.manyak.adminkit.query.AdminDateRange
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import tools.jackson.databind.ObjectMapper

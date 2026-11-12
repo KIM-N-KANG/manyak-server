@@ -1,6 +1,7 @@
 package com.knk.manyak.story.entity
 
 import com.knk.manyak.story.dto.SimpleStoryTagCategory
+import com.knk.manyak.story.dto.StoryCreationTagSource
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.EnumType
@@ -12,11 +13,6 @@ import jakarta.persistence.PreUpdate
 import jakarta.persistence.Table
 import jakarta.persistence.UniqueConstraint
 import java.time.Instant
-
-enum class StoryCreationTagSource {
-    PREDEFINED,
-    CUSTOM,
-}
 
 @Entity
 @Table(

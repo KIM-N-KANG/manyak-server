@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.core.env.Environment
+import javax.sql.DataSource
 
 /**
  * 테스트 격리 회귀 가드.
@@ -25,12 +26,17 @@ class TestDatasourceIsolationGuardTests {
     @Autowired
     private lateinit var environment: Environment
 
+    @Autowired
+    private lateinit var dataSource: DataSource
+
     @Test
     fun `프로파일을 지정하지 않은 통합 테스트도 격리된 H2 test 프로파일로 부팅된다`() {
         assertThat(environment.activeProfiles)
             .`as`("기본 활성 프로파일은 test여야 한다(누락 시 local→실 DB로 유출).")
             .contains("test")
-        assertThat(environment.getProperty("spring.datasource.url"))
+        // 테스트 프로파일은 url을 두지 않고 컨텍스트마다 고유한 인메모리 H2를 만든다(KNK-2070). 그래서 설정값이 아니라
+        // 실제로 연결된 DB의 URL을 본다.
+        assertThat(dataSource.connection.use { it.metaData.url })
             .`as`("테스트 datasource는 격리된 H2여야 한다.")
             .startsWith("jdbc:h2:mem:")
         assertThat(environment.getProperty("spring.flyway.enabled"))
