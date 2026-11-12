@@ -1,6 +1,7 @@
 package com.knk.manyak.story.service
 
 import com.knk.manyak.story.entity.UserStoryEndingReach
+import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Propagation
@@ -18,10 +19,12 @@ import org.springframework.transaction.annotation.Transactional
  *
  * 호출부는 chat의 턴 저장(`ChatTurnPersister`)이지만 `user_story_ending_reaches`가 story 소유 테이블이라 story 모듈에 둔다
  * (KNK-2055). 별도 빈이어야 REQUIRES_NEW가 프록시를 타므로 호출부 클래스에 합치지 않는다.
+ * 게스트 이관의 백필([backfillIfAbsent])만 예외로 호출자 트랜잭션에 합류한다(KNK-2080).
  */
 @Component
 class EndingReachRecorder(
     private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
+    private val storyEndingRepository: StoryEndingRepository,
 ) {
 
     /**
@@ -44,5 +47,25 @@ class EndingReachRecorder(
                 endingId = endingId,
             ),
         )
+    }
+
+    /**
+     * 게스트 이관이 클레임한 채팅의 도달을 회원 도달 집계에 최초 1회 백필한다(STORY 4-3-10 이관 백필, KNK-2080).
+     * [record]와 달리 **호출자(이관) 트랜잭션에 합류**한다. 이관의 회원 잠금 트랜잭션에서 클레임과 함께 커밋되고, 저장은
+     * flush하지 않아 다음 문장 전에 반영된다(이관 코드에 있던 동작 그대로).
+     *
+     * 이름이 정본이다(V70). 이름 스냅샷이 없으면(V67 이전 채팅과 그 배포 창) 라이브 엔딩에서 해소하고, 둘 다 없으면 건너뛴다.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun backfillIfAbsent(userId: Long, storyId: Long, endingId: Long?, endingNameSnapshot: String?) {
+        val endingName = endingNameSnapshot
+            ?: endingId?.let { storyEndingRepository.findById(it).orElse(null)?.name }
+            ?: return
+        // 집계 행의 이름은 NOT NULL이고 유니크 키다(V71). 이름 하나로 확인하면 충분하다.
+        if (!userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, storyId, endingName)) {
+            userStoryEndingReachRepository.save(
+                UserStoryEndingReach(userId = userId, storyId = storyId, endingNameSnapshot = endingName, endingId = endingId),
+            )
+        }
     }
 }
