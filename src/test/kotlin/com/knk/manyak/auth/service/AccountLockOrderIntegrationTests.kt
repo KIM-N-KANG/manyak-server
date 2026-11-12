@@ -171,6 +171,50 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
             .isEqualTo(MIGRATE_WITH_CLAIM_ORDER)
     }
 
+    @Autowired private lateinit var creationSessions: com.knk.manyak.story.repository.StoryCreationSessionRepository
+    @Autowired private lateinit var creationRequests: com.knk.manyak.story.repository.StoryCreationRequestRepository
+
+    @Test fun `게스트 이관은 회원 잠금 뒤 스토리와 진행, 채팅을 항목 순서로 클레임하고 0행이면 소유자를 다시 읽는다`() {
+        // KNK-2080 PR2 전 고정. ACCOUNT 5-2-2: 소유자가 비어 있을 때만 바꾸는 조건부 갱신, 0행이면 실제 소유자를 다시 읽는다.
+        val device = "lock-order-device"
+        val hash = com.knk.manyak.global.observability.DeviceIdHasher("").hash(device)
+        val guestStories = (1..2).map { i ->
+            val story = stories.save(Story(title = "게스트 $i", visibility = com.knk.manyak.story.dto.StoryVisibility.PRIVATE))
+            val requestId = UUID.randomUUID()
+            creationRequests.save(com.knk.manyak.story.entity.StoryCreationRequest(requestId = requestId, deviceIdHash = hash,
+                stage = StoryCreationStage.STORY_COMPLETION, status = com.knk.manyak.story.dto.StoryCreationRequestStatus.COMPLETED))
+            creationSessions.save(com.knk.manyak.story.entity.StoryCreationSession(status = com.knk.manyak.story.dto.StoryCreationSessionStatus.STORY_CREATED)
+                .apply { storyId = story.id; creationRequestId = requestId })
+            story
+        }
+        val base = stories.save(Story(title = "공개"))
+        val reached = chats.save(StoryChat(storyId = base.id).apply { reachedEndingNameSnapshot = "엔딩" })
+        val plain = chats.save(StoryChat(storyId = base.id))
+        val raced = chats.save(StoryChat(storyId = base.id))
+        val other = users.save(User(nickname = "먼저 클레임한 회원", status = UserStatus.ACTIVE))
+        // 스냅샷 뒤 조건부 갱신 직전에 다른 회원이 먼저 클레임해 커밋한 경합을 만든다. 갱신은 0행이 되고 소유자를 다시 읽는다.
+        // 리포지토리 스파이는 실제 빈에 위임하는 기본 응답으로 만들어진다. 경합을 만든 뒤 그 응답으로 실제 갱신을 실행한다.
+        val delegate = org.mockito.Mockito.mockingDetails(chats).mockCreationSettings.defaultAnswer
+        org.mockito.Mockito.doAnswer { invocation ->
+            if (invocation.getArgument<UUID>(0) == raced.publicId) {
+                val newTx = org.springframework.transaction.support.TransactionTemplate(transactionManager).apply {
+                    propagationBehavior = org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW
+                }
+                newTx.executeWithoutResult { jdbc.update("UPDATE story_chats SET user_id = ? WHERE id = ?", other.id, raced.id) }
+            }
+            delegate.answer(invocation)
+        }.`when`(chats).claimByPublicId(org.mockito.ArgumentMatchers.any(UUID::class.java) ?: UUID.randomUUID(), org.mockito.ArgumentMatchers.anyLong())
+        val request = MigrationRequest(storyIds = guestStories.map { it.publicId.toString() },
+            chatIds = listOf(reached, plain, raced).map { it.publicId.toString() })
+        lateinit var response: com.knk.manyak.migration.dto.MigrationResponse
+
+        val statements = LockSql.statements { response = migration.migrate(member.id, request, hash) }
+
+        assertThat(response.stories.map { it.status.name }).containsExactly("MIGRATED", "MIGRATED")
+        assertThat(response.chats.map { it.status.name }).containsExactly("MIGRATED", "MIGRATED", "CONFLICT")
+        assertThat(statements).isEqualTo(MIGRATE_GUEST_ITEMS_ORDER)
+    }
+
     @Test fun `푸시 설정 조회는 회원 행을 잠그고 변경은 커밋에서 회원 행을 갱신한다`() {
         assertThat(LockSql.usersAndLocks { pushSettings.getSettings(member.id) }).containsExactly("lock:users")
         assertThat(LockSql.usersAndLocks { pushSettings.updateSettings(member.id, PushSettingsUpdateRequest(servicePush = false, marketingPush = true, marketingNightPush = true)) })
@@ -214,6 +258,24 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
 
         /** 채팅을 클레임한 이관: 회원 잠금 → 커밋 때 시도 수와 완료 시각을 한 번에 갱신. */
         val MIGRATE_WITH_CLAIM_ORDER = listOf("lock:users", "update:users")
+
+        /**
+         * 스토리 2(기기 증명), 채팅 3(도달 1, 경합 1)의 이관 전체 문장 순서(KNK-2080 PR2 고정). 회원 잠금 → 스토리 후보, 진행,
+         * 완성 요청(기기 해시) → 스토리마다 조건부 갱신과 진행 조건부 갱신 → 채팅 후보 → 채팅마다 조건부 갱신(도달 채팅은
+         * 도달 집계 확인, INSERT는 다음 갱신 전 자동 flush) → 경합 채팅은 0행 뒤 소유자 재조회 → 커밋 때 회원 갱신.
+         * 경합 채팅 앞의 `update:story_chats` 하나는 테스트가 별도 트랜잭션으로 넣은 선점 갱신이다.
+         */
+        val MIGRATE_GUEST_ITEMS_ORDER = listOf(
+            "lock:users",
+            "select:stories", "select:story_creation_sessions", "select:story_creation_requests",
+            "update:stories", "update:story_creation_sessions",
+            "update:stories", "update:story_creation_sessions",
+            "select:story_chats",
+            "update:story_chats", "select:user_story_ending_reaches",
+            "insert:user_story_ending_reaches", "update:story_chats",
+            "update:story_chats", "update:story_chats", "select:story_chats",
+            "update:users",
+        )
     }
 }
 
@@ -221,12 +283,14 @@ class AccountLockOrderIntegrationTests : IntegrationTest() {
  * 측정 구간에 호출 스레드에서 실행된 SQL만 모은다. 핸들러는 공유 컨텍스트의 레지스트리에 한 번 붙고, 측정 중이 아니거나
  * 다른 스레드의 쿼리는 버린다.
  */
-private object LockSql {
+internal object LockSql {
     private val sql: MutableList<String> = Collections.synchronizedList(mutableListOf())
     @Volatile private var installed: ObservationRegistry? = null
     @Volatile private var measuring: Thread? = null
     private val lock = Regex("\\bfor\\s+(no\\s+key\\s+)?update\\b", RegexOption.IGNORE_CASE)
     private val table = Regex("\\bfrom\\s+\"?(\\w+)\"?", RegexOption.IGNORE_CASE)
+    private val insertTable = Regex("\\binto\\s+\"?(\\w+)\"?", RegexOption.IGNORE_CASE)
+    private val updateTable = Regex("^\\s*update\\s+\"?(\\w+)\"?", RegexOption.IGNORE_CASE)
     private val usersUpdate = Regex("^\\s*update\\s+users\\b", RegexOption.IGNORE_CASE)
     private val usersSelect = Regex("^\\s*select\\b.*\\bfrom\\s+users\\b", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
 
@@ -239,6 +303,20 @@ private object LockSql {
             }
         })
         installed = registry
+    }
+
+    /**
+     * 모든 문장을 실행 순서대로 `동사:테이블`로 줄인다. 행 잠금은 `lock:테이블`, INSERT와 UPDATE는 대상 테이블,
+     * 그 밖의 SELECT는 첫 FROM 테이블이다(KNK-2080 쓰기 순서 고정).
+     */
+    fun statements(block: () -> Any?): List<String> = run(block).map {
+        val verb = it.trim().substringBefore(' ').lowercase()
+        when {
+            lock.containsMatchIn(it) -> "lock:" + table.find(it)!!.groupValues[1].lowercase()
+            verb == "insert" -> "insert:" + insertTable.find(it)!!.groupValues[1].lowercase()
+            verb == "update" -> "update:" + updateTable.find(it)!!.groupValues[1].lowercase()
+            else -> "$verb:" + (table.find(it)?.groupValues?.get(1)?.lowercase() ?: "?")
+        }
     }
 
     /** 행 잠금 문장의 대상 테이블. */
