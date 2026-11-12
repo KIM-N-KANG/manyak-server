@@ -31,6 +31,8 @@ class CampaignLifecycleIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var storyReader: com.knk.manyak.story.service.StoryPlayReader
+    @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var campaigns: PushCampaignRepository
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var users: UserRepository
@@ -38,7 +40,7 @@ class CampaignLifecycleIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var sender: FcmPushSender
     private val now = Instant.parse("2026-10-21T03:00:00Z")
     @BeforeEach fun clean() { cleaner.cleanAll(); reset(users, targets, sender) }
-    private fun service(at: Instant = now) = PromotionPushService(campaigns, AccountQueryService(users), sender, stories, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications, notices = notices)
+    private fun service(at: Instant = now) = PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader, Clock.fixed(at, ZoneOffset.UTC), notifications = notifications, notices = noticeService)
     private fun row(start: Instant? = null) = campaigns.save(PushCampaign(title = "예약", body = "본문", scheduledAt = now,
         status = if (start == null) PushCampaignStatus.SCHEDULED else PushCampaignStatus.SENDING, startedAt = start,
         targetCount = 4, sentCount = 2))
@@ -52,7 +54,7 @@ class CampaignLifecycleIntegrationTests : MockedBoundaryIntegrationTest() {
             override fun withZone(zone: java.time.ZoneId): Clock = this
         }
         doAnswer { at = at.plusSeconds(60); emptyList<Long>() }.`when`(targets).findMarketingPushTargetIds()
-        PromotionPushService(campaigns, AccountQueryService(users), sender, stories, clock, notifications = notifications, notices = notices).sendDue(now)
+        PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader, clock, notifications = notifications, notices = noticeService).sendDue(now)
         assertThat(campaigns.findAll().map { it.startedAt }.sortedBy { it }).containsExactly(now, now.plusSeconds(60))
     }
 

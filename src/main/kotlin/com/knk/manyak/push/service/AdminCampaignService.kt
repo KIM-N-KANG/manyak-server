@@ -9,7 +9,7 @@ import com.knk.manyak.push.repository.CampaignDeliverySummary
 import com.knk.manyak.push.repository.PushCampaignRepository
 import com.knk.manyak.push.repository.AdminCampaignListRepository
 import com.knk.manyak.push.repository.PushTargetRepository
-import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.StoryPlayReader
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -27,7 +27,7 @@ class AdminCampaignService(
     private val mapper: ObjectMapper,
     private val deliveries: CampaignDeliverySummaryRepository,
     private val campaignList: AdminCampaignListRepository,
-    private val stories: StoryRepository,
+    private val stories: StoryPlayReader,
     private val notices: com.knk.manyak.notice.service.NoticeService,
     private val clock: Clock = Clock.systemUTC(),
 ) {
@@ -44,7 +44,7 @@ class AdminCampaignService(
         if (request.storyId != null && request.noticeId != null) badRequest("이동 대상은 스토리와 공지 중 하나만 지정하세요.")
         val notice = request.noticeId?.let { notices.connectNotification(it) ?: badRequest("게시된 공지만 연결할 수 있습니다.") }
         val story = request.storyId?.let { publicId ->
-            stories.findByPublicIdAndDeletedAtIsNull(publicId)?.takeIf { it.isPubliclyListed() }
+            stories.findViewByPublicId(publicId, null)?.takeIf { it.publiclyListed }
                 ?: badRequest("이동 대상은 공개 스토리여야 합니다.")
         }
         val row = campaigns.save(PushCampaign(title = request.title, body = request.body,
@@ -87,8 +87,8 @@ class AdminCampaignService(
     private fun response(row: PushCampaign, summary: CampaignDeliverySummary = deliveries.summaries(listOf(row.id))[row.id] ?: CampaignDeliverySummary()) = AdminCampaignResponse(row.publicId, row.kind, row.title, row.body,
         row.scheduledAt, row.status, targetCount = row.targetCount, sentCount = row.sentCount,
         failureReason = row.failureReason, startedAt = row.startedAt, finishedAt = row.finishedAt, createdAt = row.createdAt,
-        noticeId = row.noticeId?.let(campaigns::findNoticePublicId),
-        storyId = row.storyId?.let { stories.findById(it).orElse(null)?.publicId },
+        noticeId = row.noticeId?.let(notices::publicIdOf),
+        storyId = row.storyId?.let(stories::findPublicId),
         deliveredMembers = summary.deliveredMembers, deliveredDevices = summary.deliveredDevices, failedDevices = summary.failedDevices)
     private fun badRequest(message: String): Nothing = throw ResponseStatusException(HttpStatus.BAD_REQUEST, message)
 }

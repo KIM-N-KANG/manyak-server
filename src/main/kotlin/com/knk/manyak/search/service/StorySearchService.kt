@@ -6,7 +6,7 @@ import com.knk.manyak.search.dto.StorySearchDocument
 import com.knk.manyak.story.dto.StoryPageResponse
 import com.knk.manyak.story.service.StoryAuthorResolver
 import com.knk.manyak.story.service.OfficialStoryAccount
-import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.service.StoryPlayReader
 import java.util.UUID
 import org.opensearch.client.opensearch.OpenSearchClient
 import org.opensearch.client.opensearch._types.OpenSearchException
@@ -22,7 +22,7 @@ import org.springframework.web.server.ResponseStatusException
 class StorySearchService(
     private val client: OpenSearchClient?,
     private val properties: StorySearchProperties,
-    private val stories: StoryRepository,
+    private val stories: StoryPlayReader,
     private val indexer: StorySearchIndexer,
     private val officialStoryAccount: OfficialStoryAccount,
     private val authorResolver: StoryAuthorResolver,
@@ -64,9 +64,9 @@ class StorySearchService(
         val documents = page.mapNotNull { it.source() }
         val publicIds = documents.mapNotNull { runCatching { UUID.fromString(it.publicId) }.getOrNull() }.distinct()
         // 파생 visible은 지연·실패로 낡을 수 있다. 정본을 한 번 조회해 공개 철회를 응답 전에 차단한다.
-        val currentStories = if (publicIds.isEmpty()) emptyList() else stories.findAllByPublicIdIn(publicIds)
-        val visibleStories = currentStories.filter { it.isPubliclyListed() }.associateBy { it.publicId.toString() }
-        currentStories.filterNot { it.isPubliclyListed() }.forEach { story ->
+        val currentStories = if (publicIds.isEmpty()) emptyList() else stories.findViewsByPublicIds(publicIds)
+        val visibleStories = currentStories.filter { it.publiclyListed }.associateBy { it.publicId.toString() }
+        currentStories.filterNot { it.publiclyListed }.forEach { story ->
             try {
                 // 검색에는 원 트랜잭션이 없으므로 AFTER_COMMIT 이벤트가 아닌 동기 호출로 복구한다.
                 indexer.index(story.id)

@@ -43,6 +43,8 @@ class NoticeCampaignDispatchIntegrationTests : PushRemoteIntegrationTest() {
     @Autowired private lateinit var notifications: ScheduledNotificationWriter
     @Autowired private lateinit var outbox: ScheduledPushOutboxWriter
     @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var storyReader: com.knk.manyak.story.service.StoryPlayReader
+    @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired private lateinit var jdbc: JdbcTemplate
     private val now = Instant.parse("2026-10-30T03:00:00Z")
@@ -58,8 +60,8 @@ class NoticeCampaignDispatchIntegrationTests : PushRemoteIntegrationTest() {
         owner = users.save(User(nickname = "수신 회원", marketingPushAgreedAt = Instant.EPOCH))
         tokens.save(DevicePushToken(userId = owner.id, token = "notice-target", platform = PushPlatform.ANDROID))
     }
-    private fun service(remote: Boolean, at: Instant = now) = PromotionPushService(campaigns, AccountQueryService(users), sender, stories,
-        Clock.fixed(at, ZoneOffset.UTC), if (remote) outbox else null, notifications = notifications, notices = notices)
+    private fun service(remote: Boolean, at: Instant = now) = PromotionPushService(campaigns, AccountQueryService(users), sender, storyReader,
+        Clock.fixed(at, ZoneOffset.UTC), if (remote) outbox else null, notifications = notifications, notices = noticeService)
     private fun notice(tag: NoticeTag = NoticeTag.SERVICE, published: Boolean = true) = notices.save(Notice(
         title = "원문", body = "원문 본문", tag = tag, status = if (published) NoticeStatus.PUBLISHED else NoticeStatus.DRAFT,
         createdByUserId = owner.id))

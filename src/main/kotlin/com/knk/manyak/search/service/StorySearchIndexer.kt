@@ -5,24 +5,18 @@ import com.knk.manyak.search.dto.StorySearchAuthor
 import com.knk.manyak.search.dto.StorySearchDocument
 import com.knk.manyak.auth.service.AccountQueryService
 import com.knk.manyak.image.service.ImageUrlResolver
-import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.repository.StoryCharacterRepository
-import com.knk.manyak.story.repository.StoryLikeRepository
-import com.knk.manyak.story.repository.StoryRepository
+import com.knk.manyak.story.dto.StorySearchMaterial
+import com.knk.manyak.story.service.StorySearchSource
 import com.knk.manyak.story.service.StoryTurnCounts
 import org.opensearch.client.opensearch.OpenSearchClient
 import org.opensearch.client.opensearch.core.BulkRequest
 import org.slf4j.LoggerFactory
-import org.springframework.data.domain.PageRequest
-import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
 
 @Component
 class StorySearchDocumentReader(
-    private val stories: StoryRepository,
-    private val characters: StoryCharacterRepository,
-    private val likes: StoryLikeRepository,
+    private val source: StorySearchSource,
     private val turnCounts: StoryTurnCounts,
     private val accounts: AccountQueryService,
     private val images: ImageUrlResolver,
@@ -35,31 +29,28 @@ class StorySearchDocumentReader(
      * 받은 ID를 IN 하나로 읽으므로 호출자가 500건 이하로 나눈다([StorySearchIndexer.BATCH_SIZE]).
      */
     @Transactional(readOnly = true)
-    fun readAll(storyIds: Collection<Long>): List<StorySearchDocument> = documents(stories.findAllById(storyIds).sortedBy { it.id })
+    fun readAll(storyIds: Collection<Long>): List<StorySearchDocument> = documents(source.materials(storyIds))
 
     @Transactional(readOnly = true)
     fun readPage(page: Int): List<StorySearchDocument> =
-        documents(stories.findAll(PageRequest.of(page, StorySearchIndexer.BATCH_SIZE, Sort.by("id"))).content)
+        documents(source.materialsPage(page, StorySearchIndexer.BATCH_SIZE))
 
-    // 스토리 목록마다 인물, 작성자, 누적 턴 수, 좋아요 수를 한 번씩 읽는다. 단건, 묶음, 기동 재색인이 모두 이 코드로 문서를 만든다.
-    private fun documents(rows: List<Story>): List<StorySearchDocument> {
+    // 스토리 목록마다 스토리 값(인물, 좋아요 포함), 작성자, 누적 턴 수를 한 번씩 읽는다. 단건, 묶음, 기동 재색인이 모두 이 코드로 문서를 만든다.
+    private fun documents(rows: List<StorySearchMaterial>): List<StorySearchDocument> {
         if (rows.isEmpty()) return emptyList()
-        val storyIds = rows.map { it.id }
-        val characterNames = characters.findByStoryIdInOrderByStoryIdAscIdAsc(storyIds).groupBy({ it.story.id }, { it.name })
         val authors = accounts.profilesOf(rows.mapNotNull { it.userId }.toSet())
-        val turnCountByStoryId = turnCounts.countByStoryIds(storyIds)
-        val likeCountByStoryId = likes.countByStoryIds(storyIds).associate { it.storyId to it.likeCount }
+        val turnCountByStoryId = turnCounts.countByStoryIds(rows.map { it.id })
         return rows.map { story ->
             StorySearchDocument(
                 publicId = story.publicId.toString(), title = com.knk.manyak.story.service.UsernameTokenRenderer.render(story.title, story.protagonistName),
                 oneLineIntro = com.knk.manyak.story.service.UsernameTokenRenderer.render(story.oneLineIntro.orEmpty(), story.protagonistName),
                 genres = story.genre?.split(',')?.map(String::trim)?.filter(String::isNotEmpty).orEmpty(),
-                characterNames = characterNames[story.id].orEmpty(),
+                characterNames = story.characterNames,
                 thumbnailUrlSm = images.visibleThumbnailSmUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey, story.thumbnailModerationStatus),
                 author = story.userId?.let(authors::get)?.let { StorySearchAuthor(nickname = it.nickname) },
-                turnCount = turnCountByStoryId[story.id] ?: 0, likeCount = likeCountByStoryId[story.id] ?: 0,
+                turnCount = turnCountByStoryId[story.id] ?: 0, likeCount = story.likeCount,
                 createdAt = story.createdAt.toEpochMilli(),
-                visible = story.isPubliclyListed(),
+                visible = story.publiclyListed,
             )
         }
     }

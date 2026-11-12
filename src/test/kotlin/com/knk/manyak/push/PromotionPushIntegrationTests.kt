@@ -60,6 +60,8 @@ class PromotionPushIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var notices: com.knk.manyak.notice.repository.NoticeRepository
     @Autowired private lateinit var notifications: com.knk.manyak.push.inbox.ScheduledNotificationWriter
     @Autowired private lateinit var stories: StoryRepository
+    @Autowired private lateinit var storyReader: com.knk.manyak.story.service.StoryPlayReader
+    @Autowired private lateinit var noticeService: com.knk.manyak.notice.service.NoticeService
     @Autowired private lateinit var devicePushTokenRepository: DevicePushTokenRepository
     @Autowired private lateinit var pushCampaignRepository: PushCampaignRepository
     @Autowired private lateinit var databaseCleaner: DatabaseCleaner
@@ -94,7 +96,7 @@ class PromotionPushIntegrationTests : MockedBoundaryIntegrationTest() {
      * 주입된 시스템 시계를 그대로 두면 테스트를 21시 이후에 돌릴 때 결과가 달라진다.
      */
     private fun service(clock: Clock = Clock.fixed(NOW, ZoneOffset.UTC)) =
-        PromotionPushService(pushCampaignRepository, AccountQueryService(userRepository), fcmPushSender, stories, clock, notifications = notifications, notices = notices)
+        PromotionPushService(pushCampaignRepository, AccountQueryService(userRepository), fcmPushSender, storyReader, clock, notifications = notifications, notices = noticeService)
 
     private fun eligibleMember(nightAgreed: Boolean = false): User =
         saveMember(nightAgreed = nightAgreed).also { saveToken(it) }
@@ -314,7 +316,7 @@ class PromotionPushIntegrationTests : MockedBoundaryIntegrationTest() {
         val afterNight = eligibleMember()
         saveCampaign(scheduledAt = JUST_BEFORE_NIGHT)
         val crossing = SteppingClock(listOf(JUST_BEFORE_NIGHT, JUST_BEFORE_NIGHT, JUST_AFTER_NIGHT))
-        val service = PromotionPushService(pushCampaignRepository, AccountQueryService(userRepository), fcmPushSender, stories, crossing, notifications = notifications, notices = notices)
+        val service = PromotionPushService(pushCampaignRepository, AccountQueryService(userRepository), fcmPushSender, storyReader, crossing, notifications = notifications, notices = noticeService)
 
         val result = service.sendDue(JUST_BEFORE_NIGHT).single()
 

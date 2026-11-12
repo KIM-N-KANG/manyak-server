@@ -12,4 +12,6 @@ interface NoticeRepository : JpaRepository<Notice, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select n from Notice n where n.publicId=:publicId")
     fun lockByPublicId(publicId: UUID): Notice?
+    @Query("select n.publicId from Notice n where n.id=:id")
+    fun findPublicIdById(id: Long): UUID?
 }

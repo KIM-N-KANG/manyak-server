@@ -32,6 +32,7 @@ import java.util.concurrent.*
 class CreditExpiryReminderIntegrationTests : PushRemoteIntegrationTest() {
     @Autowired private lateinit var users: UserRepository
     @Autowired private lateinit var lots: CreditLotRepository
+    @Autowired private lateinit var wallet: com.knk.manyak.credit.service.CreditWalletService
     @Autowired private lateinit var tokens: DevicePushTokenRepository
     @Autowired private lateinit var templates: PushMessageTemplateRepository
     @Autowired private lateinit var text: PushMessageTemplateService
@@ -48,7 +49,7 @@ class CreditExpiryReminderIntegrationTests : PushRemoteIntegrationTest() {
     private val messages = mutableListOf<PushMessage>()
     private val fallback = PushMessage("", "", data = emptyMap(), requestId = "", sessionId = "")
     private fun service(remote: Boolean = true, cache: StringRedisTemplate = redis, at: Clock = clock) = CreditExpiryReminderService(
-        lots, AccountQueryService(users), text, sender, cache, notifications, tokens, at, outbox = if (remote) writer else null)
+        wallet, AccountQueryService(users), text, sender, cache, notifications, tokens, at, outbox = if (remote) writer else null)
     private fun cooldown(id: Long) = "push:credit-expiry-reminder:cooldown:$id"
     private fun count() = jdbc.queryForObject("SELECT COUNT(*) FROM credit_expiry_outbox_probe", Long::class.java)!!
 
