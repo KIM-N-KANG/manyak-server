@@ -27,8 +27,7 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.text.Normalizer
 import java.time.Instant
-import com.knk.manyak.credit.dto.CreditReason
-import com.knk.manyak.credit.repository.CreditTransactionRepository
+import com.knk.manyak.credit.service.ChatTurnChargeLock
 import com.knk.manyak.global.observability.StructuredLogger
 import com.knk.manyak.story.service.StoryPlayReader
 import java.util.UUID
@@ -55,7 +54,7 @@ class ChatTurnPersister(
     private val storyMessageVersionRepository: StoryMessageVersionRepository,
     private val storyChatMainEventRepository: StoryChatMainEventRepository,
     private val endingReachRecorder: EndingReachRecorder,
-    private val creditTransactionRepository: CreditTransactionRepository,
+    private val chargeLock: ChatTurnChargeLock,
 ) {
 
     private val logger = LoggerFactory.getLogger(javaClass)
@@ -541,9 +540,7 @@ class ChatTurnPersister(
 
     private fun verifyCharge(id: Long?) {
         if (id == null) return
-        val charge = creditTransactionRepository.findByIdForUpdate(id) ?: error("차감 행이 없습니다: $id")
-        check(charge.reason == CreditReason.CHAT_TURN && charge.amount < 0)
-        if (creditTransactionRepository.existsByIdempotencyKey("refund:charge:$id")) {
+        if (chargeLock.lockAndCheckRefunded(id)) {
             throw IllegalStateException("이미 환불된 턴의 저장을 취소합니다.")
         }
     }

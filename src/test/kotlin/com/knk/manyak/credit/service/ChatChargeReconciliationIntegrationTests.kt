@@ -149,7 +149,7 @@ class ChatChargeReconciliationIntegrationTests : IntegrationTest() {
 
     private fun bulkCharges(count: Int): List<Long> {
         wallet.reward(userId, count.toLong(), CreditReason.SIGNUP_REWARD, "bulk:$count")
-        val charges = wallet.deductBatch(userId, List(count) { CreditDeduction(1, CreditReason.CHAT_TURN, "CHAT_TURN", chatId) }).transactions
+        val charges = wallet.deductBatch(userId, List(count) { CreditDeduction(1, CreditReason.CHAT_TURN, "CHAT_TURN", chatId) }).charges
         for (charge in charges) jdbc.update("UPDATE credit_transactions SET created_at = DATEADD('HOUR', -1, CURRENT_TIMESTAMP) WHERE id = ?", charge.id)
         return charges.map { it.id }
     }
@@ -196,6 +196,21 @@ class ChatChargeReconciliationIntegrationTests : IntegrationTest() {
 
         assertThat(lockAndCredit(append)).isEqualTo(expected)
         assertThat(lockAndCredit(regenerate)).isEqualTo(expected)
+    }
+
+    @Autowired private lateinit var chargeLock: ChatTurnChargeLock
+
+    @Test fun `차감 행 잠금 진입점은 트랜잭션 밖에서 부르면 잠그지 않고 거부한다`() {
+        com.knk.manyak.auth.service.LockSql.install(observations)
+        val id = charge(50)
+        lateinit var thrown: Throwable
+
+        val statements = com.knk.manyak.auth.service.LockSql.statements {
+            thrown = org.assertj.core.api.Assertions.catchThrowable { chargeLock.lockAndCheckRefunded(id) }
+        }
+
+        assertThat(thrown).isInstanceOf(org.springframework.transaction.IllegalTransactionStateException::class.java)
+        assertThat(statements).isEmpty()
     }
 
     @Test fun `대사가 차감 행 잠금을 먼저 잡으면 대기 중 저장은 환불을 확인하고 폐기한다`() = race(refundFirst = true)

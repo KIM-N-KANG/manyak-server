@@ -1,6 +1,3 @@
-com.knk.manyak.chat.service.ChatService -> com.knk.manyak.credit.entity.CreditTransaction
-com.knk.manyak.chat.service.ChatTurnPersister -> com.knk.manyak.credit.entity.CreditTransaction
-com.knk.manyak.chat.service.ChatTurnPersister -> com.knk.manyak.credit.repository.CreditTransactionRepository
 com.knk.manyak.migration.service.GuestDataMigrationService -> com.knk.manyak.chat.entity.StoryChat
 com.knk.manyak.migration.service.GuestDataMigrationService -> com.knk.manyak.chat.repository.StoryChatRepository
 com.knk.manyak.migration.service.GuestDataMigrationService -> com.knk.manyak.story.entity.Story
