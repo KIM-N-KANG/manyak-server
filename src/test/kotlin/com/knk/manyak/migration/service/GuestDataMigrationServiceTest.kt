@@ -101,7 +101,7 @@ class GuestDataMigrationServiceTest {
 
         assertThat(result.stories.single().status).isEqualTo(MigrationStatus.CONFLICT)
         verify(storyRepository, never()).claimByPublicId(story.publicId, userId)
-        verify(storyCreationSessionRepository, never()).claimByStoryId(anyLong(), anyLong())
+        verify(storyCreationSessionRepository, never()).claimByStoryIds(anyCollection(), anyLong())
         verifyNoInteractions(events)
     }
 
@@ -281,7 +281,7 @@ class GuestDataMigrationServiceTest {
 
         service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
 
-        verify(storyCreationSessionRepository).claimByStoryId(77L, userId)
+        verify(storyCreationSessionRepository).claimByStoryIds(listOf(77L), userId)
     }
 
     @Test
@@ -291,7 +291,7 @@ class GuestDataMigrationServiceTest {
 
         service.migrate(userId, MigrationRequest(storyIds = listOf(pid.toString())))
 
-        verify(storyCreationSessionRepository, never()).claimByStoryId(anyLong(), anyLong())
+        verify(storyCreationSessionRepository, never()).claimByStoryIds(anyCollection(), anyLong())
     }
 
     @Test

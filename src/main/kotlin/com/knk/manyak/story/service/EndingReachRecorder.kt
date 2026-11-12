@@ -1,5 +1,6 @@
 package com.knk.manyak.story.service
 
+import com.knk.manyak.story.dto.EndingReachBackfill
 import com.knk.manyak.story.entity.UserStoryEndingReach
 import com.knk.manyak.story.repository.StoryEndingRepository
 import com.knk.manyak.story.repository.UserStoryEndingReachRepository
@@ -50,22 +51,25 @@ class EndingReachRecorder(
     }
 
     /**
-     * 게스트 이관이 클레임한 채팅의 도달을 회원 도달 집계에 최초 1회 백필한다(STORY 4-3-10 이관 백필, KNK-2080).
+     * 게스트 이관이 클레임한 채팅들의 도달을 회원 도달 집계에 최초 1회 백필한다(STORY 4-3-10 이관 백필, KNK-2080).
      * [record]와 달리 **호출자(이관) 트랜잭션에 합류**한다. 이관의 회원 잠금 트랜잭션에서 클레임과 함께 커밋되고, 저장은
-     * flush하지 않아 다음 문장 전에 반영된다(이관 코드에 있던 동작 그대로).
+     * flush하지 않아 커밋 때 반영된다.
      *
      * 이름이 정본이다(V70). 이름 스냅샷이 없으면(V67 이전 채팅과 그 배포 창) 라이브 엔딩에서 해소하고, 둘 다 없으면 건너뛴다.
+     * 이미 있는 도달은 한 번의 조회로 거르고, 같은 요청 안의 같은 (스토리, 엔딩 이름)은 첫 채팅의 것만 남긴다.
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    fun backfillIfAbsent(userId: Long, storyId: Long, endingId: Long?, endingNameSnapshot: String?) {
-        val endingName = endingNameSnapshot
-            ?: endingId?.let { storyEndingRepository.findById(it).orElse(null)?.name }
-            ?: return
-        // 집계 행의 이름은 NOT NULL이고 유니크 키다(V71). 이름 하나로 확인하면 충분하다.
-        if (!userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, storyId, endingName)) {
-            userStoryEndingReachRepository.save(
-                UserStoryEndingReach(userId = userId, storyId = storyId, endingNameSnapshot = endingName, endingId = endingId),
-            )
-        }
+    fun backfillIfAbsent(userId: Long, reaches: List<EndingReachBackfill>) {
+        val named = reaches.mapNotNull { reach ->
+            val name = reach.endingNameSnapshot
+                ?: reach.endingId?.let { storyEndingRepository.findById(it).orElse(null)?.name }
+                ?: return@mapNotNull null
+            UserStoryEndingReach(userId = userId, storyId = reach.storyId, endingNameSnapshot = name, endingId = reach.endingId)
+        }.distinctBy { it.storyId to it.endingNameSnapshot }
+        if (named.isEmpty()) return
+        // 집계 행의 (회원, 스토리, 이름)은 유니크 키다(V71). 이름 하나로 확인하면 충분하다.
+        val existing = userStoryEndingReachRepository.findByUserIdAndStoryIdIn(userId, named.map { it.storyId }.toSet())
+            .map { it.storyId to it.endingNameSnapshot }.toSet()
+        userStoryEndingReachRepository.saveAll(named.filterNot { (it.storyId to it.endingNameSnapshot) in existing })
     }
 }

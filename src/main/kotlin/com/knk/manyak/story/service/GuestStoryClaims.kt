@@ -45,15 +45,17 @@ class GuestStoryClaims(
         }
     }
 
+    /** 소유자가 비어 있을 때만 [userId]로 바꾸는 조건부 갱신. 바꿨으면 true, 0행이면 false. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun claim(publicId: UUID, userId: Long): Boolean = stories.claimByPublicId(publicId, userId) == 1
+
     /**
-     * 소유자가 비어 있을 때만 [userId]로 바꾸는 조건부 갱신. 바꿨으면 연결된 진행의 소유자도 같은 조건으로 맞추고 true.
-     * 진행 소유자가 비어 남으면 스토리라인 평가와 취소가 익명 취급으로 열린다. 0행이면 아무것도 하지 않고 false.
+     * 이 요청에서 클레임한 스토리들의 진행 소유자를 같은 조건(비어 있을 때만)으로 한 번에 맞춘다. 진행 소유자가 비어 남으면
+     * 스토리라인 평가와 취소가 익명 취급으로 열린다. 스토리 클레임과 같은 트랜잭션에서 부른다.
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    fun claim(publicId: UUID, storyId: Long, userId: Long): Boolean {
-        if (stories.claimByPublicId(publicId, userId) != 1) return false
-        sessions.claimByStoryId(storyId, userId)
-        return true
+    fun claimSessions(storyIds: Collection<Long>, userId: Long) {
+        if (storyIds.isNotEmpty()) sessions.claimByStoryIds(storyIds, userId)
     }
 
     /** 조건부 갱신이 0행일 때 실제 소유자를 다시 읽는다. */
