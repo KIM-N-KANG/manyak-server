@@ -149,7 +149,7 @@ class ChatChargeReconciliationIntegrationTests : IntegrationTest() {
 
     private fun bulkCharges(count: Int): List<Long> {
         wallet.reward(userId, count.toLong(), CreditReason.SIGNUP_REWARD, "bulk:$count")
-        val charges = wallet.deductBatch(userId, List(count) { CreditDeduction(1, CreditReason.CHAT_TURN, "CHAT_TURN", chatId) }).transactions
+        val charges = wallet.deductBatch(userId, List(count) { CreditDeduction(1, CreditReason.CHAT_TURN, "CHAT_TURN", chatId) }).charges
         for (charge in charges) jdbc.update("UPDATE credit_transactions SET created_at = DATEADD('HOUR', -1, CURRENT_TIMESTAMP) WHERE id = ?", charge.id)
         return charges.map { it.id }
     }
@@ -172,6 +172,45 @@ class ChatChargeReconciliationIntegrationTests : IntegrationTest() {
         assertThat(second.chargesScanned).isZero()
         assertThat(second.refundsEmitted).isZero()
         assertThat(reconciliation.reconcile().chargesScanned).isZero()
+    }
+
+    @Autowired private lateinit var observations: io.micrometer.observation.ObservationRegistry
+
+    @Test fun `유료 턴 저장은 이어쓰기와 재생성 모두 채팅 행 다음 차감 행을 잠그고 환불 키를 확인하며 지갑은 잠그지 않는다`() {
+        // KNK-2080 PR2 전 고정. CHAT 5-2-1: 잠금 순서는 채팅 행, 차감 행이고 지갑은 잠그지 않음.
+        com.knk.manyak.auth.service.LockSql.install(observations)
+        fun lockAndCredit(statements: List<String>) = statements.filter { it.startsWith("lock:") || it.contains("credit_") }
+        val expected = listOf("lock:story_chats", "lock:credit_transactions", "select:credit_transactions")
+
+        val appendCharge = charge(50)
+        lateinit var appended: com.knk.manyak.chat.service.ChatTurnPersister.PersistedTurn
+        val append = com.knk.manyak.auth.service.LockSql.statements {
+            appended = persister.persistTurn(chatId, "입력", "출력", emptyList(), judgmentSource = TurnJudgmentSource(),
+                expectedState = GenerationStartState(null, 0), billingModelCode = "AURORA", creditTransactionId = appendCharge)
+        }
+        val regenerateCharge = charge(50)
+        val regenerate = com.knk.manyak.auth.service.LockSql.statements {
+            persister.regenerateLastTurn(chatId, appended.turnId, "재생성", emptyList(), GenerationStartState(appended.turnId, 0),
+                "AURORA", creditTransactionId = regenerateCharge)
+        }
+
+        assertThat(lockAndCredit(append)).isEqualTo(expected)
+        assertThat(lockAndCredit(regenerate)).isEqualTo(expected)
+    }
+
+    @Autowired private lateinit var chargeLock: ChatTurnChargeLock
+
+    @Test fun `차감 행 잠금 진입점은 트랜잭션 밖에서 부르면 잠그지 않고 거부한다`() {
+        com.knk.manyak.auth.service.LockSql.install(observations)
+        val id = charge(50)
+        lateinit var thrown: Throwable
+
+        val statements = com.knk.manyak.auth.service.LockSql.statements {
+            thrown = org.assertj.core.api.Assertions.catchThrowable { chargeLock.lockAndCheckRefunded(id) }
+        }
+
+        assertThat(thrown).isInstanceOf(org.springframework.transaction.IllegalTransactionStateException::class.java)
+        assertThat(statements).isEmpty()
     }
 
     @Test fun `대사가 차감 행 잠금을 먼저 잡으면 대기 중 저장은 환불을 확인하고 폐기한다`() = race(refundFirst = true)

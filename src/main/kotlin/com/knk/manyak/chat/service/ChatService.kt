@@ -31,7 +31,7 @@ import com.knk.manyak.chat.repository.StoryChoiceRepository
 import com.knk.manyak.chat.repository.StoryMessageRepository
 import com.knk.manyak.chat.repository.StoryChatRepository
 import com.knk.manyak.credit.InsufficientCreditException
-import com.knk.manyak.credit.entity.CreditTransaction
+import com.knk.manyak.credit.dto.CreditCharge
 import com.knk.manyak.credit.service.CreditDeduction
 import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.service.CreditWalletService
@@ -636,7 +636,7 @@ class ChatService(
         var guestDeviceId: String? = null
         var imageReservation = ChatRealtimeImageService.Reservation(null)
         var imageCall: com.knk.manyak.global.observability.aicall.ChatImageAiCallRecorder.Call? = null
-        var charges = emptyList<CreditTransaction>()
+        var charges = emptyList<CreditCharge>()
         val refundGate = AtomicBoolean(false) // 턴 체험/턴 비용만 소유한다. 이미지 환불과 공유하지 않는다.
         val trialRefundKey = "refund:chatturn:${UUID.randomUUID()}"
         fun turnCharge() = charges.firstOrNull { it.reason == CreditReason.CHAT_TURN }
@@ -675,7 +675,7 @@ class ChatService(
                     if (!memberTrialCovered && billingModel.turnCost > 0) add(CreditDeduction(billingModel.turnCost, CreditReason.CHAT_TURN, "CHAT_TURN", chatPk))
                     if (imageReservation.cost > 0) add(CreditDeduction(imageReservation.cost, CreditReason.CHAT_IMAGE, "CHAT_IMAGE", chatPk))
                 }
-                if (items.isNotEmpty()) charges = creditWalletService.deductBatch(userId, items).transactions
+                if (items.isNotEmpty()) charges = creditWalletService.deductBatch(userId, items).charges
             }
             chatRealtimeImageService.issue(imageReservation, chat.publicId, requireNotNull(aiCall.traceLink.turnNumber))
             if (imageReservation.slot != null) imageCall = imageAiCalls.start(chat.storyId, chat.publicId)

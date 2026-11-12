@@ -3,8 +3,8 @@ package com.knk.manyak.migration.service
 import com.knk.manyak.auth.service.AccountCommandService
 import com.knk.manyak.auth.service.AccountLockService
 import com.knk.manyak.auth.service.AccountQueryService
-import com.knk.manyak.chat.entity.StoryChat
-import com.knk.manyak.chat.repository.StoryChatRepository
+import com.knk.manyak.chat.dto.GuestChatCandidate
+import com.knk.manyak.chat.service.GuestChatClaims
 import com.knk.manyak.global.observability.analytics.AnalyticsErrorType
 import com.knk.manyak.global.observability.analytics.ServerAnalytics
 import com.knk.manyak.auth.security.requireActiveStatus
@@ -12,13 +12,9 @@ import com.knk.manyak.migration.dto.MigrationRequest
 import com.knk.manyak.migration.dto.MigrationResponse
 import com.knk.manyak.migration.dto.MigrationResult
 import com.knk.manyak.migration.dto.MigrationStatus
-import com.knk.manyak.story.entity.UserStoryEndingReach
-import com.knk.manyak.story.entity.Story
-import com.knk.manyak.story.repository.StoryCreationRequestRepository
-import com.knk.manyak.story.repository.StoryCreationSessionRepository
-import com.knk.manyak.story.repository.StoryEndingRepository
-import com.knk.manyak.story.repository.StoryRepository
-import com.knk.manyak.story.repository.UserStoryEndingReachRepository
+import com.knk.manyak.story.dto.GuestStoryCandidate
+import com.knk.manyak.story.service.EndingReachRecorder
+import com.knk.manyak.story.service.GuestStoryClaims
 import com.knk.manyak.story.event.StoryIndexRequestedEvent
 import org.springframework.context.ApplicationEventPublisher
 import org.slf4j.LoggerFactory
@@ -47,18 +43,15 @@ import java.util.UUID
  */
 @Service
 class GuestDataMigrationService(
-    private val storyRepository: StoryRepository,
-    private val storyChatRepository: StoryChatRepository,
-    private val storyCreationSessionRepository: StoryCreationSessionRepository,
+    private val storyClaims: GuestStoryClaims,
+    private val chatClaims: GuestChatClaims,
     private val locks: AccountLockService,
     private val accounts: AccountQueryService,
     private val commands: AccountCommandService,
-    private val userStoryEndingReachRepository: UserStoryEndingReachRepository,
-    // 이름 스냅샷이 비어 있는 채팅(롤링 배포 창에 구버전이 만든 행)의 이름을 라이브 엔딩에서 해소한다.
-    private val storyEndingRepository: StoryEndingRepository,
+    // 클레임한 채팅의 엔딩 도달 백필. 이관 트랜잭션에 합류한다(REQUIRES_NEW인 record를 쓰지 않는다).
+    private val endingReaches: EndingReachRecorder,
     private val serverAnalytics: ServerAnalytics,
     private val events: ApplicationEventPublisher,
-    private val storyCreationRequestRepository: StoryCreationRequestRepository,
 ) {
 
     private val log = LoggerFactory.getLogger(javaClass)
@@ -149,25 +142,19 @@ class GuestDataMigrationService(
     }
 
     private fun claimStories(userId: Long, ids: List<UUID>, deviceIdHash: String?): List<MigrationResult> {
-        val storyByPublicId = storyRepository.findAllByPublicIdInAndDeletedAtIsNull(ids.toSet())
-            .associateBy { it.publicId }
-        val ownerByPublicId = storyByPublicId.mapValues { it.value.userId }
-        val deviceHashesByStoryId = loadStoryDeviceHashes(storyByPublicId.values.filter { it.userId == null })
+        val storyByPublicId = storyClaims.candidates(ids.toSet())
+        val ownerByPublicId = storyByPublicId.mapValues { it.value.ownerUserId }
         val claimed = mutableSetOf<UUID>()
         return ids.map { id ->
             val status = status(
                 id, userId, ownerByPublicId, claimed,
-                claim = { storyRepository.claimByPublicId(id, userId) },
-                currentOwner = { storyRepository.findUserIdByPublicId(id) },
-                canClaim = {
-                    val story = storyByPublicId.getValue(id)
-                    hasStoryDeviceProof(story, deviceHashesByStoryId[story.id].orEmpty(), deviceIdHash)
-                },
+                // 스토리를 새로 클레임하면 연결된 생성 세션 소유권도 같은 호출에서 맞춘다(익명 세션의 storyline 평가가 열리는 것 방지).
+                claim = { storyClaims.claim(id, storyByPublicId.getValue(id).storyId, userId) },
+                currentOwner = { storyClaims.ownerOf(id) },
+                canClaim = { hasStoryDeviceProof(storyByPublicId.getValue(id), deviceIdHash) },
             )
             if (status == MigrationStatus.MIGRATED) {
-                // 스토리를 새로 클레임했으면 연결된 생성 세션 소유권도 맞춘다(익명 세션의 storyline 평가가 열리는 것 방지).
-                val storyId = storyByPublicId.getValue(id).id
-                storyCreationSessionRepository.claimByStoryId(storyId, userId)
+                val storyId = storyByPublicId.getValue(id).storyId
                 // 닉네임 변경과 동일하게 트랜잭션 안에서 발행하고 커밋 후 비동기로 다시 읽는다.
                 // PUBLIC/PRIVATE 모두 요청해야 이후 공개 전환과 경합해도 검색 문서가 누락되지 않는다.
                 try {
@@ -181,35 +168,21 @@ class GuestDataMigrationService(
         }
     }
 
-    private fun loadStoryDeviceHashes(stories: Collection<Story>): Map<Long, List<String>> {
-        if (stories.isEmpty()) return emptyMap()
-        val sessions = storyCreationSessionRepository.findAllByStoryIdIn(stories.map { it.id }.toSet())
-        val requestIds = sessions.mapNotNull { it.creationRequestId }.toSet()
-        val requestsById = if (requestIds.isEmpty()) emptyMap() else
-            storyCreationRequestRepository.findAllByRequestIdIn(requestIds).associateBy { it.requestId }
-        return sessions.mapNotNull { session ->
-            val storyId = session.storyId ?: return@mapNotNull null
-            val hash = requestsById[session.creationRequestId]?.deviceIdHash?.takeIf { it.isNotBlank() }
-                ?: return@mapNotNull null
-            storyId to hash
-        }.groupBy({ it.first }, { it.second })
-    }
-
-    private fun hasStoryDeviceProof(story: Story, recordedHashes: List<String>, deviceIdHash: String?): Boolean {
-        if (recordedHashes.isNotEmpty()) return recordedHashes.all { it == deviceIdHash }
-        return !(story.isPubliclyVisible() && story.deletedAt == null)
+    /** 완성 요청에 기기 해시가 기록된 스토리는 모두 같은 기기여야 한다. 기록이 없으면 공개 목록에 노출된 스토리만 거부한다. */
+    private fun hasStoryDeviceProof(story: GuestStoryCandidate, deviceIdHash: String?): Boolean {
+        if (story.recordedDeviceHashes.isNotEmpty()) return story.recordedDeviceHashes.all { it == deviceIdHash }
+        return !story.publiclyListed
     }
 
     private fun claimChats(userId: Long, ids: List<UUID>): List<MigrationResult> {
-        val chatByPublicId = storyChatRepository.findAllByPublicIdInAndDeletedAtIsNull(ids.toSet())
-            .associateBy { it.publicId }
-        val ownerByPublicId = chatByPublicId.mapValues { it.value.userId }
+        val chatByPublicId = chatClaims.candidates(ids.toSet())
+        val ownerByPublicId = chatByPublicId.mapValues { it.value.ownerUserId }
         val claimed = mutableSetOf<UUID>()
         return ids.map { id ->
             val status = status(
                 id, userId, ownerByPublicId, claimed,
-                claim = { storyChatRepository.claimByPublicId(id, userId) },
-                currentOwner = { storyChatRepository.findUserIdByPublicId(id) },
+                claim = { chatClaims.claim(id, userId) },
+                currentOwner = { chatClaims.ownerOf(id) },
             )
             // 새로 클레임한 게스트 채팅이 엔딩에 도달했었다면 회원 도달 집계에 백필한다(스펙 §4-3-10 이관 백필).
             if (status == MigrationStatus.MIGRATED) {
@@ -219,42 +192,24 @@ class GuestDataMigrationService(
         }
     }
 
-    /** 이관된 채팅이 도달한 엔딩을 회원 도달 집계에 최초 1회 upsert한다. 도달 전이면 아무것도 하지 않는다. */
-    private fun backfillEndingReach(userId: Long, chat: StoryChat) {
-        // 이름이 정본이다(V70). 엔딩이 교체돼 chat.reachedEndingId가 비어도 이름 스냅샷으로 백필한다.
-        //
-        // 이름 스냅샷이 비어 있으면 라이브 엔딩에서 해소한다. 집계 쪽 이름과 달리 **채팅의 이름 스냅샷은
-        // 여전히 nullable이다** — V67 이전에 만들어진 채팅과 그 배포 창의 채팅은 값이 없다. 그 채팅이 이관되면
-        // 이름을 알 수 없어 집계가 조용히 빠지므로 여기서 해소한다. 둘 다 없으면 남길 근거가 없어 건너뛴다.
-        val endingName = chat.reachedEndingNameSnapshot
-            ?: chat.reachedEndingId?.let { storyEndingRepository.findById(it).orElse(null)?.name }
-            ?: return
-        // 집계 행의 이름은 NOT NULL이고 유니크 키다(V71). 이름 하나로 확인하면 충분하다.
-        if (!userStoryEndingReachRepository.existsByUserIdAndStoryIdAndEndingNameSnapshot(userId, chat.storyId, endingName)) {
-            userStoryEndingReachRepository.save(
-                UserStoryEndingReach(
-                    userId = userId,
-                    storyId = chat.storyId,
-                    endingNameSnapshot = endingName,
-                    endingId = chat.reachedEndingId,
-                ),
-            )
-        }
+    /** 이관된 채팅이 도달한 엔딩을 회원 도달 집계에 최초 1회 백필한다. 도달 전이면 아무것도 하지 않는다. */
+    private fun backfillEndingReach(userId: Long, chat: GuestChatCandidate) {
+        endingReaches.backfillIfAbsent(userId, chat.storyId, chat.reachedEndingId, chat.reachedEndingNameSnapshot)
     }
 
     /**
      * 스냅샷 소유권으로 우선 판정하고, 게스트(NULL) 행만 [claim] 조건부 UPDATE로 원자적으로 클레임한다.
      * - 스냅샷에 없음 → NOT_FOUND, 요청자 소유 → ALREADY_OWNED, 타인 소유 → CONFLICT.
-     * - 게스트 행: 같은 요청 내 중복이면 ALREADY_OWNED, claim이 1이면 MIGRATED.
+     * - 게스트 행: 같은 요청 내 중복이면 ALREADY_OWNED, claim이 true(1행 갱신)면 MIGRATED.
      * - 스토리의 기기 증명([canClaim])에 실패하면 조건부 갱신 전에 CONFLICT로 거절한다.
-     * - claim이 0(동시 요청에 선점됨)이면 [currentOwner]로 실제 소유자를 재확인한다: 요청자면 ALREADY_OWNED(멱등), 아니면 CONFLICT.
+     * - claim이 false(0행, 동시 요청에 선점됨)면 [currentOwner]로 실제 소유자를 재확인한다: 요청자면 ALREADY_OWNED(멱등), 아니면 CONFLICT.
      */
     private fun status(
         id: UUID,
         userId: Long,
         ownerByPublicId: Map<UUID, Long?>,
         claimed: MutableSet<UUID>,
-        claim: () -> Int,
+        claim: () -> Boolean,
         currentOwner: () -> Long?,
         canClaim: () -> Boolean = { true },
     ): MigrationStatus = when {
@@ -263,7 +218,7 @@ class GuestDataMigrationService(
         ownerByPublicId[id] != null -> MigrationStatus.CONFLICT
         id in claimed -> MigrationStatus.ALREADY_OWNED
         !canClaim() -> MigrationStatus.CONFLICT
-        claim() == 1 -> { claimed.add(id); MigrationStatus.MIGRATED }
+        claim() -> { claimed.add(id); MigrationStatus.MIGRATED }
         currentOwner() == userId -> MigrationStatus.ALREADY_OWNED
         else -> MigrationStatus.CONFLICT
     }

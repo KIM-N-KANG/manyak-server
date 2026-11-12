@@ -58,8 +58,8 @@ class CreditWalletServiceIntegrationTest : IntegrationTest() {
             CreditDeduction(30, CreditReason.CHAT_IMAGE, "CHAT_IMAGE", 1),
         ))
         assertThat(result.balance).isEqualTo(50)
-        assertThat(result.transactions.map { it.amount }).containsExactly(-20L, -30L)
-        assertThat(result.transactions.map { it.refType }).containsExactly("CHAT", "CHAT_IMAGE")
+        assertThat(result.charges.map { it.amount }).containsExactly(-20L, -30L)
+        assertThat(result.charges.map { it.refType }).containsExactly("CHAT", "CHAT_IMAGE")
         assertThat(service.balanceOf(userId)).isEqualTo(50)
     }
 
@@ -76,7 +76,7 @@ class CreditWalletServiceIntegrationTest : IntegrationTest() {
 
     @Test
     fun `빈 batch는 지갑이나 원장을 만들지 않는다`() {
-        assertThat(service.deductBatch(userId, emptyList()).transactions).isEmpty()
+        assertThat(service.deductBatch(userId, emptyList()).charges).isEmpty()
         assertThat(walletRepository.findByUserId(userId)).isNull()
         assertThat(transactionRepository.count()).isZero()
     }

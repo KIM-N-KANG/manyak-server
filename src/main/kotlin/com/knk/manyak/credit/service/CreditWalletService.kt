@@ -2,6 +2,7 @@ package com.knk.manyak.credit.service
 
 import com.knk.manyak.credit.InsufficientCreditException
 import com.knk.manyak.credit.entity.CreditLot
+import com.knk.manyak.credit.dto.CreditCharge
 import com.knk.manyak.credit.dto.CreditExpiryTarget
 import com.knk.manyak.credit.dto.CreditReason
 import com.knk.manyak.credit.entity.CreditTransaction
@@ -21,7 +22,7 @@ import kotlin.math.min
 
 /** 양수 비용 한 항목. 서로 다른 refType으로 환불·대사 범위를 분리할 수 있다. */
 data class CreditDeduction(val amount: Long, val reason: CreditReason, val refType: String? = null, val refId: Long? = null)
-data class CreditDeductionOutcome(val balance: Long, val transactions: List<CreditTransaction>)
+data class CreditDeductionOutcome(val balance: Long, val charges: List<CreditCharge>)
 
 data class AdminWalletOutcome(val beforeBalance: Long, val appliedAmount: Long, val balance: Long, val expiresAt: Instant?, val transactionId: Long?)
 
@@ -277,14 +278,14 @@ class CreditWalletService(
             toConsume -= take
         }
         check(toConsume == 0L) { "FIFO 소진 후 남은 차감량이 있습니다: userId=$userId, remaining=$toConsume" }
-        val transactions = items.map { item ->
+        val charges = items.map { item ->
             transactionRepository.save(CreditTransaction(
                 userId = userId, amount = -item.amount, reason = item.reason,
                 refType = item.refType, refId = item.refId,
-            ))
+            )).let { CreditCharge(it.id, it.userId, it.amount, it.reason, it.refType) }
         }
         wallet.balance -= amount
-        return CreditDeductionOutcome(wallet.balance, transactions)
+        return CreditDeductionOutcome(wallet.balance, charges)
     }
 
     /**

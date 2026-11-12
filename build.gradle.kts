@@ -91,7 +91,7 @@ dependencies {
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     // LauncherSessionListener(EmbeddedRedisLauncherSessionListener)를 컴파일·구현하려면 launcher가 컴파일 클래스패스에 필요하다.
     testImplementation("org.junit.platform:junit-platform-launcher")
-    // 모듈 경계 측정(ModuleBoundaryTests, KNK-2054). 바이트코드 임포터로만 쓴다. Boot BOM이 관리하지 않아 버전을 명시한다.
+    // 모듈 경계 가드(ModuleBoundaryTests, KNK-2054). 바이트코드 임포터로만 쓴다. Boot BOM이 관리하지 않아 버전을 명시한다.
     testImplementation("com.tngtech.archunit:archunit:1.5.1")
 }
 
