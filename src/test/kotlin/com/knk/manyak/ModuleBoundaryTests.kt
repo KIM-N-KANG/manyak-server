@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test
  * 람다(`Foo$Companion`, `Foo$1`)는 바깥 클래스로 접는다. 줄 번호·메서드 시그니처는 담지 않아 코드가 움직여도 줄이 바뀌지 않는다.
  *
  * 규칙(모두 위반이 비어 있어야 한다, BE-061):
- * - **R1**: 다른 모듈의 리포지토리·엔티티를 직접 참조하지 않는다. 대상이 `..repository..`·`..entity..`
+ * - **R1**: 다른 모듈의 리포지토리와 엔티티를 직접 참조하지 않는다. 대상이 `..repository..`, `..entity..`
  *   패키지에 있거나, `@Entity`·`@Embeddable`·`@MappedSuperclass`·`@Repository`가 붙었거나 Spring Data `Repository` 하위 타입이면
  *   위반이다(기능 하위 패키지의 `story.draft.StoryDraftRepository` 같은 것도 잡는다). 줄 = `참조하는 클래스 -> 참조되는 클래스`.
  *   admin도 예외가 아니다(여러 모듈의 데이터를 읽는 관리자 모듈이어도 다른 모듈의 리포지토리와 엔티티는 직접 참조하지 않는다.
@@ -39,7 +39,7 @@ class ModuleBoundaryTests {
         assertNoViolations(
             rule = "R1",
             violations = violations,
-            hint = "다른 모듈의 리포지토리·엔티티를 직접 참조했다. 그 모듈의 서비스(또는 서비스가 내주는 DTO·이벤트)를 통해 접근하세요.",
+            hint = "다른 모듈의 리포지토리와 엔티티를 직접 참조했다. 그 모듈의 서비스(또는 서비스가 내주는 DTO와 이벤트)를 통해 접근하세요.",
         )
     }
 
