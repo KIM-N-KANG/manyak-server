@@ -135,6 +135,10 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         // 다른 requestId를 가진 동시 요청이 먼저 저장을 끝낸 상황과 같아, compile 후 잠금 시점에 409가 난다.
         @Volatile
         var flipSessionToCreatedId: Long? = null
+
+        // 컴파일 호출 시점(선차감 뒤)에 실행할 테스트 훅. 차감 뒤에만 실패를 주입할 때 쓴다(KNK-2081).
+        @Volatile
+        var onCompile: (() -> Unit)? = null
     }
 
     class FakeAiClientConfig {
@@ -147,6 +151,7 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
 
             override fun compileStory(request: AiStoryCompileRequest, traceLink: AiTraceLink): AiStoryCompileResponse {
                 capturedRequest = request
+                onCompile?.invoke()
                 flipSessionToCreatedId?.let { sessionId ->
                     // 별도 트랜잭션으로 커밋해야 compileAndPersist의 findByIdForUpdate가 새 상태를 본다.
                     TransactionTemplate(transactionManager).executeWithoutResult {
@@ -234,6 +239,7 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         endingsOverride = null
         mainEventsOverride = null
         flipSessionToCreatedId = null
+        onCompile = null
         characterAppearances = emptyList()
         characterImages = emptyList()
         characterIntroductions = emptyList()
@@ -776,9 +782,12 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         val seed = wallet.balanceOf(member.id)
         endingsOverride = duplicateEndings
         val storyline = persistStorylineWithGenre("로맨스", member.id)
+        val before = refundCounts()
 
         postSimpleStory(storyline, token = jwt.issueAccessToken(member.publicId)).expectStatus().isEqualTo(502)
 
+        assertThat(refundCounts()).isEqualTo(before.first + 1 to before.second)
+        assertThat(refundFailedLogs()).isEmpty()
         assertThat(wallet.balanceOf(member.id)).isEqualTo(seed)
         val refunds = ledger.findAll().filter { it.reason == com.knk.manyak.credit.dto.CreditReason.REFUND }
         assertThat(refunds).hasSize(1)
@@ -786,6 +795,109 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
         assertThat(refunds.single().idempotencyKey).startsWith("refund:story:")
         assertThat(storyRepository.findAll()).isEmpty()
         assertThat(requestStatuses()).containsExactly("FAILED")
+    }
+
+    @Autowired private lateinit var structuredLogger: com.knk.manyak.global.observability.StructuredLogger
+    @Autowired private lateinit var redis: org.springframework.data.redis.core.StringRedisTemplate
+    @Autowired private lateinit var walletRows: com.knk.manyak.credit.repository.CreditWalletRepository
+    @Autowired private lateinit var completion: com.knk.manyak.story.service.SimpleStoryCompletionService
+
+    /** `manyak.story.creation.refund`의 (success, failure) 누적값. */
+    private fun refundCounts(): Pair<Long, Long> = listOf("success", "failure").map {
+        meterRegistry.find("manyak.story.creation.refund").tag("outcome", it).counter()?.count()?.toLong() ?: 0L
+    }.let { it[0] to it[1] }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun refundFailedLogs(): List<Map<String, Any?>> = org.mockito.Mockito.mockingDetails(structuredLogger).invocations
+        .filter { it.method.name == "event" && it.arguments[0] == "story_creation_refund_failed" && it.arguments[1] is Map<*, *> }
+        .map { it.arguments[1] as Map<String, Any?> }
+
+    /** 키가 `{prefix}...:story_creation`인 체험 카운터의 복원 스크립트(인자 없는 호출)만 실패시킨다. 예약(인자 1개)은 그대로 둔다. */
+    private fun failTrialRestore(prefix: String, error: RuntimeException) {
+        org.mockito.Mockito.doThrow(error).`when`(redis).execute(
+            org.mockito.Mockito.any(org.springframework.data.redis.core.script.RedisScript::class.java),
+            org.mockito.ArgumentMatchers.argThat<List<String>> { it != null && it.size == 1 && it[0].startsWith(prefix) && it[0].endsWith(":story_creation") },
+        )
+    }
+
+    @Test
+    fun `컴파일 뒤 저장 실패에서 이프 환불이 실패해도 원래 502로 응답하고 환불 실패를 기록한다`() {
+        // KNK-2081, STORY 5-3-4. 지금은 환불 예외가 원래 502를 덮어 500이 된다.
+        val member = payingMember()
+        val seed = wallet.balanceOf(member.id)
+        endingsOverride = duplicateEndings
+        val storyline = persistStorylineWithGenre("로맨스", member.id)
+        // 차감이 끝난 컴파일 시점에만 지갑 잠금이 실패하게 해 환불만 깨뜨린다.
+        onCompile = {
+            org.mockito.Mockito.doThrow(org.springframework.dao.QueryTimeoutException("refund down(test)"))
+                .`when`(walletRows).findByUserIdForUpdate(member.id)
+        }
+        val before = refundCounts()
+
+        postSimpleStory(storyline, token = jwt.issueAccessToken(member.publicId)).expectStatus().isEqualTo(502)
+            .expectBody().jsonPath("$.code").isEqualTo("BAD_GATEWAY")
+
+        assertThat(refundCounts()).isEqualTo(before.first to before.second + 1)
+        val log = refundFailedLogs().single()
+        assertThat(log.keys).containsExactly("stage", "requester", "creation_id", "idempotency_key", "error")
+        assertThat(log["stage"]).isEqualTo("story_completion")
+        assertThat(log["requester"]).isEqualTo("member_credit")
+        assertThat(log["creation_id"]).isEqualTo(storyline.creationSession.id)
+        assertThat(log["idempotency_key"] as String).startsWith("refund:story:")
+        assertThat(log["error"]).isEqualTo("QueryTimeoutException")
+        assertThat(wallet.balanceOf(member.id)).isEqualTo(seed - creationCost)
+        assertThat(ledger.findAll().map { it.reason }).doesNotContain(com.knk.manyak.credit.dto.CreditReason.REFUND)
+        assertThat(requestStatuses()).containsExactly("FAILED")
+    }
+
+    @Test
+    fun `컴파일 뒤 저장 실패에서 회원 체험 복원이 실패를 반환하면 원래 502로 응답하고 환불 실패를 기록한다`() {
+        // KNK-2081. 지금은 restoreMember의 false를 버려 아무 기록이 없다.
+        val member = users.save(com.knk.manyak.auth.entity.User(nickname = "체험회원"))
+        endingsOverride = duplicateEndings
+        val storyline = persistStorylineWithGenre("로맨스", member.id)
+        failTrialRestore("member_trial:", org.springframework.data.redis.RedisConnectionFailureException("redis down(test)"))
+        val before = refundCounts()
+
+        postSimpleStory(storyline, token = jwt.issueAccessToken(member.publicId)).expectStatus().isEqualTo(502)
+            .expectBody().jsonPath("$.code").isEqualTo("BAD_GATEWAY")
+
+        assertThat(refundCounts()).isEqualTo(before.first to before.second + 1)
+        val log = refundFailedLogs().single()
+        assertThat(log).isEqualTo(mapOf("stage" to "story_completion", "requester" to "member_trial",
+            "creation_id" to storyline.creationSession.id, "error" to "member_trial_restore_failed"))
+        assertThat(memberTrialUsed(member.id)).isEqualTo(1)
+        assertThat(requestStatuses()).containsExactly("FAILED")
+    }
+
+    @Test
+    fun `컴파일 뒤 저장 실패에서 게스트 횟수 복원이 실패해도 원래 502로 응답하고 보상 예외를 덧붙인다`() {
+        // KNK-2081. 지금은 복원 예외가 원래 502를 덮어 500이 된다.
+        endingsOverride = duplicateEndings
+        val storyline = persistStorylineWithGenre("로맨스")
+        failTrialRestore("guest_trial:", org.springframework.data.redis.RedisConnectionFailureException("redis down(test)"))
+        val before = refundCounts()
+
+        postSimpleStory(storyline).expectStatus().isEqualTo(502).expectBody().jsonPath("$.code").isEqualTo("BAD_GATEWAY")
+
+        assertThat(refundCounts()).isEqualTo(before.first to before.second + 1)
+        assertThat(refundFailedLogs().single()).isEqualTo(mapOf("stage" to "story_completion", "requester" to "guest",
+            "creation_id" to storyline.creationSession.id, "error" to "RedisConnectionFailureException"))
+        assertThat(requestStatuses()).containsExactly("FAILED")
+
+        // 서비스를 직접 불러 던지는 예외가 원래 502이고 보상 예외가 덧붙었는지 본다. 앞 요청의 복원이 실패해 이 기기의
+        // 완성 횟수(한도 1)가 소진됐으므로 다른 기기로 부른다.
+        val again = persistStorylineWithGenre("판타지")
+        val thrown = org.assertj.core.api.Assertions.catchThrowable {
+            completion.createSimpleStory(
+                com.knk.manyak.story.dto.CreateSimpleStoryRequest(requestId = java.util.UUID.randomUUID(),
+                    simpleCreationId = again.creationSession.id, storylineId = again.id),
+                userId = null, deviceId = "suppressed-device",
+            )
+        }
+        assertThat(thrown).isInstanceOf(org.springframework.web.server.ResponseStatusException::class.java)
+        assertThat((thrown as org.springframework.web.server.ResponseStatusException).statusCode.value()).isEqualTo(502)
+        assertThat(thrown.suppressed.map { it::class.java }).containsExactly(org.springframework.data.redis.RedisConnectionFailureException::class.java)
     }
 
     @Test

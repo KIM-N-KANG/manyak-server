@@ -73,6 +73,8 @@ class SimpleStoryCompletionService(
     private val guestTrialLimitService: GuestTrialLimitService,
     private val suspensionGuard: SuspensionGuard,
     private val storyCreationRequestRecorder: StoryCreationRequestRecorder,
+    // 환불과 횟수 복원 결과 기록(KNK-2081). 되돌리기가 실패해도 원래 예외를 다시 던진다.
+    private val refunds: StoryCreationRefunds,
     // 간편 제작 1회 소모 크레딧. 운영 중 조정 가능한 정책값이라 요청마다 해석한다(KNK-1056).
     private val creditPolicyService: CreditPolicyService,
     // 완성 푸시 발행(KNK-1115). 수신은 커밋 뒤(StoryCompletionPushListener)라 발송 실패가 생성을 되돌리지 않는다.
@@ -385,6 +387,7 @@ class SimpleStoryCompletionService(
     /**
      * [block]이 성공하면 선차감·게스트 예약을 유지하고, 실패(예외)하면 회원은 전액 환불, 게스트는 예약한
      * 체험 한도 카운터를 복원한 뒤 원래 예외를 다시 던진다(회원·게스트는 배타적이라 [userId]·[guestDeviceId] 중 하나만 채워짐).
+     * 되돌리기가 실패해도 원래 예외를 던지고, 실패는 [StoryCreationRefunds]가 기록한다(STORY 5-3-4, KNK-2081).
      *
      * 환불 멱등 키(`refund:story:{chargeAttemptId}`)는 차감 시도별로 유일하므로, 같은 세션을 재시도해 여러 번 차감돼도
      * 각 차감이 자기 시도의 환불과만 짝지어진다(재시도 시 환불 유실 방지). 재시도 안전은 시도별 키가, 중복 실행 방지는
@@ -403,23 +406,40 @@ class SimpleStoryCompletionService(
         try {
             return block()
         } catch (throwable: Throwable) {
+            val stage = StoryCreationRefunds.Stage.STORY_COMPLETION
             if (memberTrialCovered) {
                 // 체험 잔여로 무료 처리됐으면 크레딧 환불이 아니라 회원 체험 카운터를 되돌린다(스펙 §4-3-7 B13).
-                userId?.let { guestTrialLimitService.restoreMember(it, GuestTrialLimitService.Counter.STORY_CREATION) }
+                // restoreMember는 Redis 장애를 삼키고 false를 돌려주므로 그 값이 곧 성공 여부다(PAYMENT 5-3).
+                userId?.let {
+                    refunds.restore(throwable, stage, StoryCreationRefunds.Requester.MEMBER_TRIAL, refId) {
+                        guestTrialLimitService.restoreMember(it, GuestTrialLimitService.Counter.STORY_CREATION)
+                    }
+                }
             } else {
-                userId?.let { refundStoryCreation(it, refId, chargeAttemptId, amount) }
+                userId?.let {
+                    val idempotencyKey = "refund:story:$chargeAttemptId"
+                    refunds.restore(throwable, stage, StoryCreationRefunds.Requester.MEMBER_CREDIT, refId, idempotencyKey) {
+                        refundStoryCreation(it, refId, idempotencyKey, amount)
+                        true
+                    }
+                }
             }
-            guestDeviceId?.let { guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORY_CREATION) }
+            guestDeviceId?.let {
+                refunds.restore(throwable, stage, StoryCreationRefunds.Requester.GUEST, refId) {
+                    guestTrialLimitService.restore(it, GuestTrialLimitService.Counter.STORY_CREATION)
+                    true
+                }
+            }
             throw throwable
         }
     }
 
-    private fun refundStoryCreation(userId: Long, refId: Long, chargeAttemptId: String, amount: Long) {
+    private fun refundStoryCreation(userId: Long, refId: Long, idempotencyKey: String, amount: Long) {
         creditWalletService.reward(
             userId = userId,
             amount = amount,
             reason = CreditReason.REFUND,
-            idempotencyKey = "refund:story:$chargeAttemptId",
+            idempotencyKey = idempotencyKey,
             refType = STORY_CREDIT_REF_TYPE,
             refId = refId,
         )
