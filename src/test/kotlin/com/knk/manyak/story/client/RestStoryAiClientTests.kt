@@ -7,6 +7,7 @@ import com.sun.net.httpserver.HttpServer
 import org.slf4j.MDC
 import org.springframework.web.client.RestClientException
 import java.net.HttpURLConnection
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.time.Duration
 import java.util.UUID
@@ -31,7 +32,7 @@ class RestStoryAiClientTests {
     fun `두 AI 호출은 문자열 detail 422만 내용 거절로 구분한다`() {
         var status = 422
         var body = ""
-        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+        server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0).apply {
             createContext("/api/v1/story/") { exchange ->
                 exchange.requestBody.readBytes()
                 val bytes = body.toByteArray(Charsets.UTF_8)
@@ -41,7 +42,7 @@ class RestStoryAiClientTests {
             }
             start()
         }
-        val client = RestStoryAiClient("http://localhost:${requireNotNull(server).address.port}")
+        val client = RestStoryAiClient("http://127.0.0.1:${requireNotNull(server).address.port}")
         val calls = listOf<() -> Any>(
             { client.createStorylines(AiStorylinesRequest(listOf("판타지"), AiCharacter())) },
             { client.compileStory(AiStoryCompileRequest(listOf("판타지"), AiCharacter(), selectedStoryline = "전개", additionalInfo = "")) },
@@ -68,7 +69,7 @@ class RestStoryAiClientTests {
         var capturedContentType: String? = null
         var capturedUpgrade: String? = null
         var capturedBody: String? = null
-        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+        server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0).apply {
             createContext("/api/v1/story/storylines") { exchange ->
                 capturedContentType = exchange.requestHeaders.getFirst("Content-Type")
                 capturedUpgrade = exchange.requestHeaders.getFirst("Upgrade")
@@ -91,7 +92,7 @@ class RestStoryAiClientTests {
         }
 
         val port = requireNotNull(server).address.port
-        val response = RestStoryAiClient("http://localhost:$port").createStorylines(
+        val response = RestStoryAiClient("http://127.0.0.1:$port").createStorylines(
             AiStorylinesRequest(
                 genreTags = listOf("판타지"),
                 protagonist = AiCharacter(features = listOf("기억상실")),
@@ -113,7 +114,7 @@ class RestStoryAiClientTests {
         var sessionId: String? = null
         var deviceIdHash: String? = null
         var deviceIdRaw: String? = null
-        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+        server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0).apply {
             createContext("/api/v1/story/storylines") { exchange ->
                 requestId = exchange.requestHeaders.getFirst("X-Manyak-Request-Id")
                 sessionId = exchange.requestHeaders.getFirst("X-Manyak-Session-Id")
@@ -128,7 +129,7 @@ class RestStoryAiClientTests {
         MDC.put(MdcKeys.REQUEST_ID, "req_story_1")
         MDC.put(MdcKeys.SESSION_ID, "sess_story_1")
         MDC.put(MdcKeys.DEVICE_ID_HASH, "device_hash_story")
-        RestStoryAiClient("http://localhost:$port").createStorylines(
+        RestStoryAiClient("http://127.0.0.1:$port").createStorylines(
             AiStorylinesRequest(
                 genreTags = listOf("판타지"),
                 protagonist = AiCharacter(),
@@ -144,7 +145,7 @@ class RestStoryAiClientTests {
     @Test
     fun `스토리라인 호출에 연결 식별자 헤더를 싣는다`() {
         val captured = mutableMapOf<String, String?>()
-        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+        server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0).apply {
             createContext("/api/v1/story/storylines") { exchange ->
                 TRACE_HEADER_NAMES.forEach { captured[it] = exchange.requestHeaders.getFirst(it) }
                 exchange.respondJson(STORYLINES_RESPONSE_JSON)
@@ -155,7 +156,7 @@ class RestStoryAiClientTests {
         val port = requireNotNull(server).address.port
         val creationId = UUID.randomUUID()
         val parentCreationId = UUID.randomUUID()
-        RestStoryAiClient("http://localhost:$port").createStorylines(
+        RestStoryAiClient("http://127.0.0.1:$port").createStorylines(
             AiStorylinesRequest(
                 genreTags = listOf("판타지"),
                 protagonist = AiCharacter(),
@@ -171,7 +172,7 @@ class RestStoryAiClientTests {
     @Test
     fun `연결 식별자가 없으면 해당 헤더를 생략한다`() {
         val captured = mutableMapOf<String, String?>()
-        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+        server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0).apply {
             createContext("/api/v1/story/storylines") { exchange ->
                 TRACE_HEADER_NAMES.forEach { captured[it] = exchange.requestHeaders.getFirst(it) }
                 exchange.respondJson(STORYLINES_RESPONSE_JSON)
@@ -180,7 +181,7 @@ class RestStoryAiClientTests {
         }
 
         val port = requireNotNull(server).address.port
-        RestStoryAiClient("http://localhost:$port").createStorylines(
+        RestStoryAiClient("http://127.0.0.1:$port").createStorylines(
             AiStorylinesRequest(
                 genreTags = listOf("판타지"),
                 protagonist = AiCharacter(),
@@ -193,7 +194,7 @@ class RestStoryAiClientTests {
     @Test
     fun `compile 호출에 스토리라인 연결 식별자 헤더를 싣는다`() {
         val captured = mutableMapOf<String, String?>()
-        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+        server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0).apply {
             createContext("/api/v1/story/compile") { exchange ->
                 TRACE_HEADER_NAMES.forEach { captured[it] = exchange.requestHeaders.getFirst(it) }
                 exchange.respondJson(COMPILE_RESPONSE_JSON)
@@ -203,7 +204,7 @@ class RestStoryAiClientTests {
 
         val port = requireNotNull(server).address.port
         val creationId = UUID.randomUUID()
-        RestStoryAiClient("http://localhost:$port").compileStory(
+        RestStoryAiClient("http://127.0.0.1:$port").compileStory(
             AiStoryCompileRequest(
                 genreTags = listOf("판타지"),
                 protagonist = AiCharacter(),
@@ -221,7 +222,7 @@ class RestStoryAiClientTests {
 
     @Test
     fun `AI 서버 응답이 지연되면 read timeout으로 실패한다`() {
-        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+        server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0).apply {
             createContext("/api/v1/story/storylines") { exchange ->
                 exchange.requestBody.close()
                 Thread.sleep(500)
@@ -232,7 +233,7 @@ class RestStoryAiClientTests {
 
         val port = requireNotNull(server).address.port
         val client = RestStoryAiClient(
-            aiBaseUrl = "http://localhost:$port",
+            aiBaseUrl = "http://127.0.0.1:$port",
             connectTimeout = Duration.ofMillis(100),
             storylineReadTimeout = Duration.ofMillis(100),
             compileReadTimeout = Duration.ofMillis(100),
@@ -250,7 +251,7 @@ class RestStoryAiClientTests {
 
     @Test
     fun `compile은 storyline과 독립된 read timeout을 사용한다`() {
-        server = HttpServer.create(InetSocketAddress(0), 0).apply {
+        server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0).apply {
             createContext("/api/v1/story/storylines") { exchange ->
                 exchange.requestBody.close()
                 Thread.sleep(400)
@@ -266,7 +267,7 @@ class RestStoryAiClientTests {
 
         val port = requireNotNull(server).address.port
         val client = RestStoryAiClient(
-            aiBaseUrl = "http://localhost:$port",
+            aiBaseUrl = "http://127.0.0.1:$port",
             connectTimeout = Duration.ofMillis(500),
             storylineReadTimeout = Duration.ofMillis(150),
             compileReadTimeout = Duration.ofSeconds(3),
