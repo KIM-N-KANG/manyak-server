@@ -218,6 +218,19 @@ class PushOutboxPostgresTests {
         assertThatThrownBy { store.insertAll(messages.take(1), now) }
             .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException::class.java)
     }
+    @Test fun `묶음 기록은 배열 리터럴에서 특수한 문자가 든 payload도 원문 JSON 그대로 저장하고 선점에서 읽는다`() {
+        val tricky = "한글 \"따옴표\" 역슬래시\\ {중괄호}, 쉼표\n줄바꿈\t탭 NULL"
+        val messages = listOf(
+            PushMessage("tricky:1", "r1", data = mapOf("type" to "NOTICE", "title" to tricky, "body" to "{\"a\":1},{b}"), requestId = "t", sessionId = "s"),
+            PushMessage("tricky:2,\"{}\\", "r2", data = mapOf("type" to "NOTICE", "title" to "\\\"", "body" to ""), requestId = "t", sessionId = "s"),
+        )
+        assertThat(tx.execute { store.insertAll(messages, now) }).isEqualTo(2)
+        val stored = jdbc.queryForList("SELECT payload::text FROM push_outbox ORDER BY id", String::class.java)
+        assertThat(stored.map { mapper.readTree(it) }).containsExactlyElementsOf(messages.map { mapper.readTree(mapper.writeValueAsString(it)) })
+        assertThat(store.claim(now, Duration.ofSeconds(60), 100).map { it.message }).containsExactlyElementsOf(messages)
+        assertThat(jdbc.queryForList("SELECT message_id FROM push_outbox ORDER BY id", String::class.java))
+            .containsExactlyElementsOf(messages.map { it.messageId })
+    }
     @Test fun `선점은 행 수와 무관하게 조회 한 문장과 임대 갱신 한 문장이다`() {
         tx.executeWithoutResult { (1..3).forEach { store.insert(PushMessage("count:$it", "r$it", data = mapOf("type" to "NOTICE"), requestId = "t", sessionId = "s"), now) } }
         statements.clear()
