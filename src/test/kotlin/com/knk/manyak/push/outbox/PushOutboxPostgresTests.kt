@@ -174,6 +174,27 @@ class PushOutboxPostgresTests {
         assertThat(store.complete(rows.single(), now.plusSeconds(61))).isZero()
         assertThat(store.complete(reclaimed, now.plusSeconds(61))).isEqualTo(1)
     }
+    @Test fun `선점은 id 순서로 배치 크기만큼 가져오고 가져온 행에만 같은 임대 만료를 기록한다`() {
+        tx.executeWithoutResult { (1..3).forEach { store.insert(PushMessage("lease:$it", "r$it", data = mapOf("type" to "NOTICE"), requestId = "t", sessionId = "s"), now) } }
+        val first = store.claim(now, Duration.ofSeconds(60), 2)
+        assertThat(first.map { it.message.messageId }).containsExactly("lease:1", "lease:2")
+        assertThat(first.map { it.id }).isSorted()
+        assertThat(first.map { it.leaseUntil }).containsOnly(now.plusSeconds(60))
+        assertThat(jdbc.queryForList("SELECT next_attempt_at FROM push_outbox ORDER BY id", java.sql.Timestamp::class.java).map { it.toInstant() })
+            .containsExactly(now.plusSeconds(60), now.plusSeconds(60), now)
+        assertThat(store.claim(now, Duration.ofSeconds(60), 2).map { it.message.messageId }).containsExactly("lease:3")
+        assertThat(store.claim(now, Duration.ofSeconds(60), 2)).isEmpty()
+    }
+    @Test fun `회차 기록은 대상 순서대로 쌓이고 같은 회차의 중복 대상은 한 건으로 센다`() {
+        val writer = context.getBean(ScheduledPushOutboxWriter::class.java)
+        val users = context.getBean(UserRepository::class.java)
+        val second = User(id = 8, nickname = "두 번째")
+        `when`(users.findById(8)).thenReturn(Optional.of(second))
+        val data = mapOf("type" to "NOTICE")
+        assertThat(writer.record(listOf(8, 7, 8), data, "notice", "camp-order", kind = "SERVICE")).isEqualTo(2)
+        assertThat(store.claim(now, Duration.ofSeconds(60), 100).map { it.message.recipientId })
+            .containsExactly(second.publicId.toString(), user.publicId.toString())
+    }
     @Test fun `다른 트랜잭션이 잠근 행은 SKIP LOCKED로 건너뛴다`() {
         record()
         val locked = CountDownLatch(1)
