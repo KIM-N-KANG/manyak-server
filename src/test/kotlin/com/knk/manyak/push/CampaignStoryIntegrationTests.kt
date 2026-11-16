@@ -1,5 +1,6 @@
 package com.knk.manyak.push
 
+import com.knk.manyak.support.forwardInsertAllToInsert
 import com.knk.manyak.support.MockedBoundaryIntegrationTest
 import com.knk.manyak.support.PushRemoteIntegrationTest
 import org.springframework.test.context.TestPropertySource
@@ -57,6 +58,7 @@ abstract class CampaignStoryIntegrationTests : MockedBoundaryIntegrationTest() {
     private val data = mutableListOf<Map<String, String>>()
 
     @BeforeEach fun setup() {
+        store.forwardInsertAllToInsert()
         cleaner.cleanAll()
         data.clear()
         admin = users.save(User(nickname = "관리자", marketingPushAgreedAt = Instant.EPOCH,

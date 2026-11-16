@@ -32,6 +32,8 @@ class PushOutboxPostgresTests {
     private val now = Instant.parse("2026-09-25T00:00:00Z")
     private val mapper = jacksonObjectMapper()
     private lateinit var jdbc: JdbcTemplate
+    /** 저장소가 [jdbc]로 실행한 문장. 문장 수를 보는 테스트만 비우고 읽는다. */
+    private val statements: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
     private lateinit var tx: TransactionTemplate
     private lateinit var context: AnnotationConfigApplicationContext
     private lateinit var store: PushOutboxStore
@@ -40,7 +42,12 @@ class PushOutboxPostgresTests {
 
     @BeforeAll fun start() {
         val ds = SharedPostgres.database()
-        jdbc = JdbcTemplate(ds)
+        jdbc = object : JdbcTemplate(ds) {
+            override fun update(sql: String, vararg args: Any?): Int { statements += sql.trim().substringBefore(' ').lowercase(); return super.update(sql, *args) }
+            override fun <T : Any?> query(sql: String, rowMapper: org.springframework.jdbc.core.RowMapper<T>, vararg args: Any?): MutableList<T> {
+                statements += sql.trim().substringBefore(' ').lowercase(); return super.query(sql, rowMapper, *args)
+            }
+        }
         val migration = java.io.File("src/main/resources/db/migration/V86__create_push_outbox.sql").readText()
         jdbc.execute(migration)
         val manager = DataSourceTransactionManager(ds)
@@ -101,17 +108,15 @@ class PushOutboxPostgresTests {
         val writer = context.getBean(ScheduledPushOutboxWriter::class.java)
         val data = mapOf("type" to "PROMOTION")
         val campaignId = UUID.randomUUID().toString()
-        // 첫 요청을 실제로 삽입한 뒤 두 번째 삽입이 실패한다. 회차 트랜잭션이 앞선 요청까지 되돌린다.
+        // 회차의 묶음 기록이 실제로 삽입된 뒤 실패한다. 회차 트랜잭션이 기록한 요청까지 되돌린다.
         val failing = spy(PushOutboxStore(jdbc, mapper))
         var inserts = 0
         doAnswer { call ->
-            if (++inserts == 2) {
-                assertThat(count()).isEqualTo(1)
-                error("second insert failed")
-            }
+            inserts++
             call.callRealMethod()
-        }.`when`(failing).insert(any(PushMessage::class.java) ?: PushMessage("", "", data = emptyMap(), requestId = "", sessionId = ""),
-            any(Instant::class.java) ?: Instant.EPOCH)
+            assertThat(count()).isEqualTo(1)
+            error("second insert failed")
+        }.`when`(failing).insertAll(anyList(), any(Instant::class.java) ?: Instant.EPOCH)
         // 작성기 프록시의 트랜잭션 경계를 그대로 쓰려고 대상 객체의 저장소만 잠시 바꾼다.
         val target = org.springframework.test.util.AopTestUtils.getTargetObject<ScheduledPushOutboxWriter>(writer)
         org.springframework.test.util.ReflectionTestUtils.setField(target, "store", failing)
@@ -121,7 +126,7 @@ class PushOutboxPostgresTests {
         } finally {
             org.springframework.test.util.ReflectionTestUtils.setField(target, "store", store)
         }
-        assertThat(inserts).isEqualTo(2)
+        assertThat(inserts).isEqualTo(1)
         assertThat(count()).isZero()
         // 대상 회원이 없으면 기록 전에 같은 예외로 실패하고 아무것도 남지 않는다.
         assertThatThrownBy { writer.record(listOf(7, 999), data, "promotion", campaignId) }
@@ -194,6 +199,30 @@ class PushOutboxPostgresTests {
         assertThat(writer.record(listOf(8, 7, 8), data, "notice", "camp-order", kind = "SERVICE")).isEqualTo(2)
         assertThat(store.claim(now, Duration.ofSeconds(60), 100).map { it.message.recipientId })
             .containsExactly(second.publicId.toString(), user.publicId.toString())
+    }
+    @Test fun `회차 기록은 대상 수와 무관하게 INSERT 한 문장이다`() {
+        val writer = context.getBean(ScheduledPushOutboxWriter::class.java)
+        val users = context.getBean(UserRepository::class.java)
+        (8L..9L).forEach { `when`(users.findById(it)).thenReturn(Optional.of(User(id = it, nickname = "대상$it"))) }
+        statements.clear()
+        assertThat(writer.record(listOf(7, 8, 9), mapOf("type" to "NOTICE"), "notice", "camp-count", kind = "SERVICE")).isEqualTo(3)
+        assertThat(statements).containsExactly("insert")
+    }
+    @Test fun `묶음 기록은 1000건마다 한 문장이고 묶음을 넘는 중복도 세지 않는다`() {
+        val messages = (1..1001).map { PushMessage("chunk:${if (it == 1001) 1 else it}", "r$it", data = mapOf("type" to "NOTICE"), requestId = "t", sessionId = "s") }
+        statements.clear()
+        assertThat(tx.execute { store.insertAll(messages, now) }).isEqualTo(1000)
+        assertThat(statements).containsExactly("insert", "insert")
+        assertThat(jdbc.queryForList("SELECT message_id FROM push_outbox ORDER BY id", String::class.java))
+            .containsExactlyElementsOf((1..1000).map { "chunk:$it" })
+        assertThatThrownBy { store.insertAll(messages.take(1), now) }
+            .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException::class.java)
+    }
+    @Test fun `선점은 행 수와 무관하게 조회 한 문장과 임대 갱신 한 문장이다`() {
+        tx.executeWithoutResult { (1..3).forEach { store.insert(PushMessage("count:$it", "r$it", data = mapOf("type" to "NOTICE"), requestId = "t", sessionId = "s"), now) } }
+        statements.clear()
+        assertThat(store.claim(now, Duration.ofSeconds(60), 100)).hasSize(3)
+        assertThat(statements).containsExactly("select", "update")
     }
     @Test fun `다른 트랜잭션이 잠근 행은 SKIP LOCKED로 건너뛴다`() {
         record()

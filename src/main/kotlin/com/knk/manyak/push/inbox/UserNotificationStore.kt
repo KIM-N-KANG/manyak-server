@@ -11,15 +11,28 @@ import java.util.UUID
 
 data class NotificationCursor(val id: Long, val createdAt: Instant)
 
+private val INSERT_NOTIFICATION = """
+    INSERT INTO user_notifications(public_id, user_id, message_key, type, category, title, body,
+        deep_link, story_public_id, notice_public_id, notice_tag, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING
+""".trimIndent()
+
 @Repository
 class UserNotificationStore(private val jdbc: JdbcTemplate) {
     @Transactional(propagation = Propagation.MANDATORY)
-    fun insert(row: UserNotification): Int = jdbc.update("""
-        INSERT INTO user_notifications(public_id, user_id, message_key, type, category, title, body,
-            deep_link, story_public_id, notice_public_id, notice_tag, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING
-    """.trimIndent(), row.publicId, row.userId, row.messageKey, row.type.name, row.category.name,
-        row.title, row.body, row.deepLink, row.storyPublicId, row.noticePublicId, row.noticeTag?.name, Timestamp.from(row.createdAt))
+    fun insert(row: UserNotification): Int = jdbc.update(INSERT_NOTIFICATION, *row.columns())
+
+    /** [insert]와 같은 문장을 JDBC 배치 한 번으로 실행한다. 충돌한 행은 [insert]와 같이 무시한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun insertAll(rows: List<UserNotification>) {
+        if (rows.isEmpty()) return
+        // JdbcTemplate의 널 불가 선언과 달리 SQL NULL 인자는 배치에서도 그대로 쓸 수 있다.
+        @Suppress("UNCHECKED_CAST")
+        jdbc.batchUpdate(INSERT_NOTIFICATION, rows.map { it.columns() as Array<out Any> })
+    }
+
+    private fun UserNotification.columns(): Array<Any?> = arrayOf(publicId, userId, messageKey, type.name, category.name,
+        title, body, deepLink, storyPublicId, noticePublicId, noticeTag?.name, Timestamp.from(createdAt))
 
     /** 대상 결정과 삽입은 한 문장. 토큰·서비스 설정·야간 동의는 내역의 자격이 아니다. */
     @Transactional(propagation = Propagation.MANDATORY)

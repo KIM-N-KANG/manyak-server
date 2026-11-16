@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.Instant
+import java.util.UUID
 
 /** 회차 전체를 커밋한다. 중간 회원 기록에 실패하면 앞선 회원의 요청도 함께 롤백한다. */
 @Service
@@ -24,11 +25,13 @@ class ScheduledPushOutboxWriter(
         expiresAt: Instant? = null,
         kind: String = "MARKETING",
         expiresAtByUserId: Map<Long, Instant> = emptyMap(),
+        knownPublicIds: Map<Long, UUID>? = null,
     ): Int {
         val now = clock.instant()
         // 자격은 소비자가 재확인한다. 여기서는 내부 ID를 공개 식별자로만 변환한다. 대상이 사라졌으면 기록 전에 실패해 회차가 롤백된다.
-        val publicIds = accounts.requirePublicIdsOf(targetIds)
-        return targetIds.sumOf { userId ->
+        // 같은 회차에서 이미 변환한 호출자는 [knownPublicIds]를 넘겨 회원 조회를 다시 하지 않는다.
+        val publicIds = knownPublicIds ?: accounts.requirePublicIdsOf(targetIds)
+        val messages = targetIds.map { userId ->
             val recipientId = publicIds.getValue(userId).toString()
             val messageId = when (scenario) {
                 "attendance" -> "attendance:$recipientId:$occurrence"
@@ -37,7 +40,7 @@ class ScheduledPushOutboxWriter(
                 "notice" -> "notice:$occurrence:$recipientId"
                 else -> error("Unknown scheduled push scenario: $scenario")
             }
-            store.insert(PushMessage(
+            PushMessage(
                 messageId = messageId,
                 recipientId = recipientId,
                 kind = kind,
@@ -46,7 +49,8 @@ class ScheduledPushOutboxWriter(
                 expiresAt = expiresAtByUserId[userId] ?: expiresAt,
                 requestId = "unknown",
                 sessionId = "unknown",
-            ), now)
+            )
         }
+        return store.insertAll(messages, now)
     }
 }
