@@ -120,8 +120,12 @@ tasks.withType<Test> {
     // 통합 테스트는 Spring 컨텍스트를 30개 넘게 캐시에 상주시킨다(각각 앱·Tomcat·H2·커넥션풀).
     // Gradle 기본 힙(512m)으로는 GC에 시간을 뺏겨 CI에서 테스트 클라이언트가 ReadTimeout으로 끊긴다
     // (OOM이 아니라 지연이다 — KNK-686). 러너는 7~16GB이므로 여유를 준다.
-    // maxParallelForks는 올리지 않는다: 포크마다 컨텍스트 캐시와 임베디드 Redis가 복제돼 메모리가 배로 든다.
     maxHeapSize = "2g"
+    // 포크 수(KNK-2059). 컨텍스트 조합이 23개로 줄어(KNK-2053) 포크마다 컨텍스트 캐시, 임베디드 Redis, 컨테이너를 따로 가져도
+    // 2g 안에 든다. 로컬 맥(15코어, 48GB) 전체 테스트 3회씩: 포크 1 약 203초, 2 약 128초, 3 약 123초, 9회 모두 실패 0.
+    // 3은 2보다 4%만 빨라 로컬 기본값은 2다. `-PtestForks=N`으로 바꾼다. CI(환경변수 CI, 2코어 러너)는 항상 1이다.
+    maxParallelForks = if (providers.environmentVariable("CI").isPresent) 1
+        else providers.gradleProperty("testForks").map(String::toInt).getOrElse(2)
     // 테스트는 항상 격리된 H2(test 프로파일, Flyway off)로만 돈다. 아래 두 안전장치는
     // @ActiveProfiles("test")를 빠뜨린 통합 테스트가 기본 프로파일(application.yml의 local)로 부팅해
     // datasource가 ${MANYAK_DB_URL}(dev/local Postgres)로 해석되고 Flyway가 실 DB에 도는 격리 유출을 막는다.
