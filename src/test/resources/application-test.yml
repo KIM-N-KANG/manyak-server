@@ -92,3 +92,9 @@ manyak:
     feedback:
       # 테스트는 외부(구글)로 절대 발송하지 않는다. form-id 를 비워 발송을 끈다.
       form-id: ""
+
+server:
+  # 테스트 Tomcat을 루프백에만 연다(KNK-2079). 와일드카드로 열면 macOS에서는 다른 앱(포트 전달 도구 등)이 같은 포트를
+  # 127.0.0.1에 SO_REUSEADDR로 다시 잡을 수 있고, 그러면 localhost로 보낸 테스트 요청을 그 앱이 받는다(관리자 지표 테스트가
+  # 한꺼번에 "200 기대, 400"으로 실패). 같은 주소에 먼저 잡혀 있으면 그 bind가 실패한다. 가드: TestServerLoopbackGuardTests.
+  address: 127.0.0.1
