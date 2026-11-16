@@ -68,7 +68,9 @@ class UploadedObjectHeadsTests {
             flagAfter.set(Thread.currentThread().isInterrupted)
         }
         caller.start()
-        while (started.get() < 4) Thread.onSpinWait()
+        val startDeadline = System.nanoTime() + 5_000_000_000L
+        while (started.get() < 4 && System.nanoTime() < startDeadline) Thread.onSpinWait()
+        assertThat(started.get()).isEqualTo(4)
         caller.interrupt()
         caller.join(5_000)
 
