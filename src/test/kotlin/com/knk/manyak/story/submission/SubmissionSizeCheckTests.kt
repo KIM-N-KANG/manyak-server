@@ -20,9 +20,9 @@ class SubmissionSizeCheckTests {
         val actualJson = input.deepCopy() as ObjectNode
         actualJson.put("submissionId", "00000000-0000-0000-0000-000000000000")
         val total = 4L + mapper.writeValueAsBytes(actualJson).size
-        SubmissionSizeCheck(storage, mapper, total).check(input, input, emptyMap(), false)
+        SubmissionSizeCheck(storage, mapper, total, com.knk.manyak.image.service.UploadedObjectHeads(storage)).check(input, input, emptyMap(), false)
         assertThrows(CodedResponseStatusException::class.java) {
-            SubmissionSizeCheck(storage, mapper, total - 1).check(input, input, emptyMap(), false)
+            SubmissionSizeCheck(storage, mapper, total - 1, com.knk.manyak.image.service.UploadedObjectHeads(storage)).check(input, input, emptyMap(), false)
         }.also { assertEquals("IMAGES_TOO_LARGE", it.errorCode) }
     }
 
@@ -31,7 +31,7 @@ class SubmissionSizeCheckTests {
         `when`(storage.serveUrlOf("")).thenReturn("https://cdn.test/")
         `when`(storage.head("face.webp")).thenReturn(UploadedObject("image/webp", 900))
         assertThrows(CodedResponseStatusException::class.java) {
-            SubmissionSizeCheck(storage, mapper, 2000).check(input, input, emptyMap(), true)
+            SubmissionSizeCheck(storage, mapper, 2000, com.knk.manyak.image.service.UploadedObjectHeads(storage)).check(input, input, emptyMap(), true)
         }
         verify(storage, times(2)).head("face.webp")
     }
@@ -40,7 +40,7 @@ class SubmissionSizeCheckTests {
         val input = mapper.readTree("""{"thumbnailUrl":"https://external.test/cover.webp"}""")
         `when`(storage.serveUrlOf("")).thenReturn("https://cdn.test/")
         assertThrows(CodedResponseStatusException::class.java) {
-            SubmissionSizeCheck(storage, mapper, 6L * 1024 * 1024).check(input, input, emptyMap(), true)
+            SubmissionSizeCheck(storage, mapper, 6L * 1024 * 1024, com.knk.manyak.image.service.UploadedObjectHeads(storage)).check(input, input, emptyMap(), true)
         }
         verify(storage, never()).head(anyString())
     }

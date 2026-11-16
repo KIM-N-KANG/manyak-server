@@ -5,6 +5,7 @@ import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.service.*
 import com.knk.manyak.image.service.UploadedImageKind
 import com.knk.manyak.image.service.UploadedImageStorage
+import com.knk.manyak.image.service.UploadedObject
 import jakarta.validation.Validator
 import org.springframework.stereotype.Component
 import org.springframework.http.HttpStatus
@@ -32,8 +33,9 @@ class SubmissionFormAssembler(
             requireDistinctMainEventNames(request.mainEvents.map { it.name })
             request.startSettings.forEach { requireDistinctEndingNames(it.endings.map { ending -> ending.name }) }
         }
-        form.set("characters", characters(request.characters, mapper.createArrayNode(), null, userId, validate, false, validatedSizes = validatedSizes))
-        request.thumbnailObjectKey?.let { form.put("thumbnailUrl", url(it, UploadedImageKind.COVER, null, userId, validate, validatedSizes)) }
+        val heads = prefetch(null, userId, validate, request.thumbnailObjectKey, request.characters)
+        form.set("characters", characters(request.characters, mapper.createArrayNode(), null, userId, validate, false, validatedSizes = validatedSizes, heads = heads))
+        request.thumbnailObjectKey?.let { form.put("thumbnailUrl", url(it, UploadedImageKind.COVER, null, userId, validate, validatedSizes, heads)) }
         form.put("thumbnailModerationStatus", "APPROVED")
         form.putNull("submission")
         if (validate) protagonistNames.validate(form)
@@ -62,15 +64,28 @@ class SubmissionFormAssembler(
         }
         val patch = mapper.valueToTree<ObjectNode>(request)
         patch.properties().forEach { (key, value) -> if (!value.isNull && key != "characters") form.set(key, value) }
-        request.characters?.let { form.set("characters", characters(it, form.path("characters"), story, userId, validate, allowDeletedImages, previousImageIds, validatedSizes)) }
-        request.thumbnailObjectKey?.let { form.put("thumbnailUrl", url(it, UploadedImageKind.COVER, story, userId, validate, validatedSizes)) }
+        val heads = prefetch(story, userId, validate, request.thumbnailObjectKey, request.characters.orEmpty())
+        request.characters?.let { form.set("characters", characters(it, form.path("characters"), story, userId, validate, allowDeletedImages, previousImageIds, validatedSizes, heads)) }
+        request.thumbnailObjectKey?.let { form.put("thumbnailUrl", url(it, UploadedImageKind.COVER, story, userId, validate, validatedSizes, heads)) }
         form.putNull("submission")
         if (validate) protagonistNames.validate(form)
         if (validate) size.check(form, aiInput(form), validatedSizes, isUpdate = true)
         return form
     }
 
-    private fun characters(inputs: List<GeneralCharacterInput>, existing: JsonNode, story: Story?, userId: Long, validate: Boolean, allowDeleted: Boolean, previousImageIds: Set<String> = emptySet(), validatedSizes: MutableMap<String, Long>): JsonNode {
+    /**
+     * 검증할 새 이미지의 HEAD를 입력 순서대로 미리 동시에 보낸다(KNK-2077). 판정은 아래 순회가 순차일 때와 같은 자리에서 하므로
+     * 여러 이미지가 실패해도 응답은 순차로 처음 만나는 오류와 같다. 잠금과 트랜잭션은 호출자의 것 그대로다.
+     */
+    private fun prefetch(story: Story?, userId: Long, validate: Boolean, thumbnail: String?, characters: List<GeneralCharacterInput>): Map<String, Result<UploadedObject?>> {
+        if (!validate) return emptyMap()
+        val objects = characters.flatMap { it.images.orEmpty() }.mapNotNull { it.objectKey }.map { UploadedImageKind.CHARACTER to it } +
+            listOfNotNull(thumbnail?.let { UploadedImageKind.COVER to it })
+        return images.prefetchUploaded(story, userId, objects)
+    }
+
+    private fun characters(inputs: List<GeneralCharacterInput>, existing: JsonNode, story: Story?, userId: Long, validate: Boolean, allowDeleted: Boolean, previousImageIds: Set<String> = emptySet(), validatedSizes: MutableMap<String, Long>,
+                           heads: Map<String, Result<UploadedObject?>> = emptyMap()): JsonNode {
         if (validate) {
             requireDistinctCharacterNames(inputs.map { it.name })
             distinctIds(inputs.map { it.id })
@@ -102,7 +117,7 @@ class SubmissionFormAssembler(
                 val image = mapper.createObjectNode().put("id", item.id).put("imageName", finalName).put("moderationStatus", "APPROVED")
                 if (item.objectKey != null) {
                     image.put("objectKey", item.objectKey)
-                    image.put("imageUrl", url(item.objectKey, UploadedImageKind.CHARACTER, story, userId, validate, validatedSizes))
+                    image.put("imageUrl", url(item.objectKey, UploadedImageKind.CHARACTER, story, userId, validate, validatedSizes, heads))
                 } else image.put("imageUrl", prior?.path("imageUrl")?.asText())
                 output.add(image)
             }
@@ -114,11 +129,12 @@ class SubmissionFormAssembler(
         return result
     }
 
-    private fun url(key: String, kind: UploadedImageKind, story: Story?, userId: Long, validate: Boolean, validatedSizes: MutableMap<String, Long>): String? {
+    private fun url(key: String, kind: UploadedImageKind, story: Story?, userId: Long, validate: Boolean, validatedSizes: MutableMap<String, Long>,
+                    heads: Map<String, Result<UploadedObject?>> = emptyMap()): String? {
         if (!validate) return storage.serveUrlOf(key)
         val owner = images.resolveUserPublicId(userId)
-        return if (story == null) images.resolveDraftUploadedUrl(owner, kind, key) { validatedSizes[key] = it }
-        else images.resolveUploadedUrl(story, owner, kind, key) { validatedSizes[key] = it }
+        return if (story == null) images.resolveDraftUploadedUrl(owner, kind, key, { validatedSizes[key] = it }, heads)
+        else images.resolveUploadedUrl(story, owner, kind, key, { validatedSizes[key] = it }, heads)
     }
 
     fun aiInput(form: JsonNode): JsonNode {
