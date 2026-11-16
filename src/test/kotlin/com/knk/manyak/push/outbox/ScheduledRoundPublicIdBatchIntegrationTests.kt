@@ -1,5 +1,6 @@
 package com.knk.manyak.push.outbox
 
+import com.knk.manyak.support.forwardInsertAllToInsert
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.credit.dto.CreditExpiryTarget
@@ -38,6 +39,7 @@ class ScheduledRoundPublicIdBatchIntegrationTests : PushRemoteIntegrationTest() 
     @BeforeEach fun setup() {
         cleaner.cleanAll()
         reset(store)
+        store.forwardInsertAllToInsert()
         messages.clear()
         doAnswer { invocation -> messages += invocation.getArgument<PushMessage>(0); 1 }
             .`when`(store).insert(any(PushMessage::class.java) ?: placeholder(), any(Instant::class.java) ?: Instant.EPOCH)

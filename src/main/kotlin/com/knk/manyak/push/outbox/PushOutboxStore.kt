@@ -26,6 +26,22 @@ class PushOutboxStore(private val jdbc: JdbcTemplate, private val mapper: Object
         """.trimIndent(), message.messageId, mapper.writeValueAsString(message), Timestamp.from(now), Timestamp.from(now))
 
     /**
+     * 예약 회차의 요청을 [INSERT_CHUNK]건마다 한 문장으로 기록하고 실제로 넣은 행 수를 돌려준다.
+     * 입력 순서대로 id가 붙고, 이미 있거나 같은 묶음에서 겹친 `message_id`는 [insert]와 같이 무시해 세지 않는다.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    fun insertAll(messages: List<PushMessage>, now: Instant): Int = messages.chunked(INSERT_CHUNK).sumOf { chunk ->
+        jdbc.update("""
+            INSERT INTO push_outbox(message_id, payload, status, attempts, next_attempt_at, created_at)
+            SELECT m.message_id, CAST(m.payload AS jsonb), 'PENDING', 0, ?, ?
+            FROM unnest(CAST(? AS text[]), CAST(? AS text[])) WITH ORDINALITY AS m(message_id, payload, ord)
+            ORDER BY m.ord
+            ON CONFLICT (message_id) DO NOTHING
+        """.trimIndent(), Timestamp.from(now), Timestamp.from(now),
+            chunk.map { it.messageId }.toTypedArray(), chunk.map { mapper.writeValueAsString(it) }.toTypedArray())
+    }
+
+    /**
      * DB 잠금을 잡은 채 브로커를 기다리지 않도록 임대 시각을 먼저 커밋한다.
      * 프로세스가 발행 도중 종료되면 이 시각 이후 다른 릴레이가 다시 가져갈 수 있다.
      * SKIP LOCKED는 다른 인스턴스가 선점 중인 행을 기다리지 않고 건너뛴다.
@@ -41,7 +57,9 @@ class PushOutboxStore(private val jdbc: JdbcTemplate, private val mapper: Object
             PushOutboxRow(rs.getLong("id"), mapper.readValue(rs.getString("payload"), PushMessage::class.java),
                 rs.getInt("attempts"), rs.getTimestamp("created_at").toInstant(), until)
         }, Timestamp.from(now), batchSize)
-        rows.forEach { jdbc.update("UPDATE push_outbox SET next_attempt_at = ? WHERE id = ?", Timestamp.from(until), it.id) }
+        // 위 SELECT가 이 트랜잭션에서 이미 잠근 행만 갱신하므로 한 문장으로 묶어도 잠금 대상과 시점이 같다.
+        if (rows.isNotEmpty()) jdbc.update("UPDATE push_outbox SET next_attempt_at = ? WHERE id = ANY(?)",
+            Timestamp.from(until), rows.map { it.id }.toLongArray())
         return rows
     }
 
@@ -61,4 +79,6 @@ class PushOutboxStore(private val jdbc: JdbcTemplate, private val mapper: Object
         UPDATE push_outbox SET status = ?, attempts = attempts + 1, next_attempt_at = ?
         WHERE id = ? AND status = 'PENDING' AND next_attempt_at = ?
     """.trimIndent(), if (abandoned) "FAILED" else "PENDING", Timestamp.from(next), row.id, Timestamp.from(row.leaseUntil))
+
+    private companion object { const val INSERT_CHUNK = 1000 }
 }

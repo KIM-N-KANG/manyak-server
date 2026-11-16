@@ -1,5 +1,6 @@
 package com.knk.manyak.push
 
+import com.knk.manyak.support.forwardInsertAllToInsert
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.auth.service.AccountQueryService
@@ -51,6 +52,7 @@ class NoticeCampaignDispatchIntegrationTests : PushRemoteIntegrationTest() {
     private lateinit var owner: User
     @BeforeEach fun setup() {
         cleaner.cleanAll(); reset(sender, users, store); messages.clear()
+        store.forwardInsertAllToInsert()
         doAnswer { invocation ->
             messages += invocation.getArgument<com.knk.manyak.push.outbox.PushMessage>(0)
             1
