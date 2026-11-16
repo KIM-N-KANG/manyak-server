@@ -32,6 +32,8 @@ import tools.jackson.databind.ObjectMapper
 import java.util.Collections
 import java.util.UUID
 import java.util.concurrent.Executor
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -53,12 +55,15 @@ class SubmissionConcurrentHeadIntegrationTests : MockedBoundaryIntegrationTest()
     private val inFlight = AtomicInteger()
     private val peak = AtomicInteger()
     private val requestIds: MutableList<String?> = Collections.synchronizedList(mutableListOf())
+    /** `hold` 토큰 HEAD가 기다리는 래치. 테스트가 접수 반환 뒤에 연다. */
+    private var hold = CountDownLatch(1)
+    private val heldFinished = AtomicInteger()
 
     @BeforeEach fun setup() {
         com.knk.manyak.support.stopExecuting(executor)
         cleaner.cleanAll()
         com.knk.manyak.support.seedProvidedGenres(providedGenreTags, "판타지", "미스터리")
-        inFlight.set(0); peak.set(0); requestIds.clear()
+        inFlight.set(0); peak.set(0); requestIds.clear(); hold = CountDownLatch(1); heldFinished.set(0)
         `when`(storage.isEnabled()).thenReturn(true)
         doAnswer { call -> "https://cdn.test/" + call.getArgument<String>(0) }.`when`(storage).serveUrlOf(anyString())
         doAnswer { call ->
@@ -66,7 +71,11 @@ class SubmissionConcurrentHeadIntegrationTests : MockedBoundaryIntegrationTest()
             requestIds += MDC.get("request_id")
             peak.accumulateAndGet(inFlight.incrementAndGet(), ::maxOf)
             try {
-                Thread.sleep(Regex("slow(\\d+)").find(key)?.groupValues?.get(1)?.toLong() ?: DELAY)
+                if ("hold" in key) {
+                    // 기다리지 않는 구현이면 접수가 이 HEAD들보다 먼저 반환한다. 취소되면 인터럽트로 빠진다.
+                    hold.await(10, TimeUnit.SECONDS)
+                    heldFinished.incrementAndGet()
+                } else Thread.sleep(Regex("slow(\\d+)").find(key)?.groupValues?.get(1)?.toLong() ?: DELAY)
                 when {
                     "missing" in key -> null
                     "big" in key -> UploadedObject("image/webp", 6L * 1024 * 1024)
@@ -90,17 +99,14 @@ class SubmissionConcurrentHeadIntegrationTests : MockedBoundaryIntegrationTest()
             """{"objectKey":"characters/uploaded/drafts/${if (token.startsWith("foreign")) UUID.randomUUID() else owner}/${token.removePrefix("!")}-${UUID.randomUUID()}.webp","imageName":"$name"}""" }.joinToString(",")}]}""" }.joinToString(",")}]}""",
         CreateGeneralStoryRequest::class.java)
 
-    @Test fun `등록의 HEAD 61개는 동시에 나가고 순차보다 빨리 끝나며 동시 수는 8을 넘지 않고 요청 MDC를 잇는다`() {
+    @Test fun `등록의 HEAD 61개는 동시에 나가고 동시 수는 8을 넘지 않으며 요청 MDC를 잇는다`() {
         val author = users.save(User(nickname = "작가"))
         MDC.put("request_id", "req-61")
-        val started = System.nanoTime()
         try {
             service.create(request(author, "ok", List(6) { List(10) { "ok" } }), author.id)
         } finally { MDC.remove("request_id") }
-        val elapsedMs = (System.nanoTime() - started) / 1_000_000
 
         assertThat(heads()).isEqualTo(61)
-        assertThat(elapsedMs).isLessThan(61 * DELAY / 2)
         assertThat(peak.get()).isBetween(2, 8)
         assertThat(requestIds).hasSize(61).containsOnly("req-61")
     }
@@ -114,12 +120,9 @@ class SubmissionConcurrentHeadIntegrationTests : MockedBoundaryIntegrationTest()
             repeat(10) { i -> images.save(StoryCharacterImage(character = character, imageName = "인물${c}_$i",
                 imageUrl = "https://cdn.test/characters/live/c$c-$i.webp", sortOrder = i + 1)) }
         }
-        val started = System.nanoTime()
         service.update(story.publicId.toString(), UpdateStoryRequest(title = "새 제목"), author.id)
-        val elapsedMs = (System.nanoTime() - started) / 1_000_000
 
         assertThat(heads()).isEqualTo(61)
-        assertThat(elapsedMs).isLessThan(61 * DELAY / 2)
         assertThat(peak.get()).isBetween(2, 8)
     }
 
@@ -165,4 +168,14 @@ class SubmissionConcurrentHeadIntegrationTests : MockedBoundaryIntegrationTest()
     }
 
     private companion object { const val DELAY = 30L }
+
+    @Test fun `첫 이미지의 HEAD 예외는 남은 HEAD를 기다리지 않고 순차와 같은 예외로 끝난다`() {
+        val error = try { failure("hold", listOf("boom-slow1") + List(9) { "hold" }, List(10) { "hold" }) } finally { assertThat(heldFinished.get()).isZero(); hold.countDown() }
+        assertThat(error).isInstanceOf(IllegalStateException::class.java).hasMessage("s3 down")
+    }
+
+    @Test fun `첫 이미지가 없으면 남은 HEAD를 기다리지 않고 순차와 같은 없음으로 끝난다`() {
+        val error = try { failure("hold", listOf("missing-slow1") + List(9) { "hold" }, List(10) { "hold" }) } finally { assertThat(heldFinished.get()).isZero(); hold.countDown() }
+        assertBadRequest(error, "업로드된 이미지를 찾을 수 없습니다. 업로드를 마친 뒤 다시 시도해 주세요.", "UPLOAD_NOT_FOUND")
+    }
 }

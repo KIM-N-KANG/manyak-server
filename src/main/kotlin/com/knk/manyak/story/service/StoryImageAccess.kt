@@ -102,6 +102,7 @@ class StoryImageAccess(
      * 제출 검증이 차례로 확인할 업로드 객체들의 HEAD를 미리 동시에 보낸다(KNK-2077). [story]가 없으면 등록 전 업로드다.
      * 접두어 검사를 통과한 키만 HEAD한다(남의 키 존재를 HEAD로 알아내지 못하게). 판정은 하지 않으며, 결과를
      * [resolveUploadedUrl], [resolveDraftUploadedUrl]의 `prefetched`로 넘기면 순차로 돌릴 때와 같은 위치에서 같은 오류를 낸다.
+     * 처음 실패하거나 없는 키 뒤의 결과는 담지 않는다([UploadedObjectHeads.headUntilMissing]).
      * 업로드가 꺼졌거나 회원이 없으면 아무것도 하지 않는다(그 오류도 순차 검증이 낸다).
      */
     fun prefetchUploaded(story: Story?, userId: Long, objects: List<Pair<UploadedImageKind, String>>): Map<String, Result<UploadedObject?>> {
@@ -111,7 +112,7 @@ class StoryImageAccess(
             val prefixes = if (story == null) draftPrefixes(owner, kind) else storyPrefixes(story, owner, kind)
             runCatching { requirePrefix(prefixes, key, "") }.isSuccess
         }.map { it.second }
-        return heads.headAll(keys)
+        return heads.headUntilMissing(keys)
     }
 
     /**
