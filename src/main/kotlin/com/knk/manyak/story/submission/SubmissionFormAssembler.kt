@@ -41,10 +41,12 @@ class SubmissionFormAssembler(
         return form
     }
 
-    fun update(story: Story, request: UpdateStoryRequest, userId: Long, validate: Boolean = true, allowDeletedImages: Boolean = false, previousImageIds: Set<String> = emptySet()): ObjectNode {
+    /** [liveForm]은 목록처럼 수정 폼을 묶음으로 미리 읽은 호출자가 넘긴다. 없으면 이 스토리의 수정 폼을 읽는다. */
+    fun update(story: Story, request: UpdateStoryRequest, userId: Long, validate: Boolean = true, allowDeletedImages: Boolean = false, previousImageIds: Set<String> = emptySet(),
+               liveForm: StoryEditFormResponse? = null): ObjectNode {
         val validatedSizes = mutableMapOf<String, Long>()
         if (validate) validateBean(request)
-        val form = mapper.valueToTree<ObjectNode>(edit.getEditForm(story.publicId.toString(), userId))
+        val form = mapper.valueToTree<ObjectNode>(liveForm ?: edit.getEditForm(story.publicId.toString(), userId))
         if (validate) {
             if (request.title?.isBlank() == true || request.oneLineIntro?.isBlank() == true) bad("제목·한 줄 소개는 비어 있을 수 없습니다.")
             if (request.visibility != null && request.visibility != story.visibility && story.status != StoryStatus.PUBLISHED) bad("등록되지 않은 스토리는 공개 범위를 바꿀 수 없습니다.")

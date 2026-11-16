@@ -8,6 +8,9 @@ interface StoryStartSettingRepository : JpaRepository<StoryStartSetting, Long> {
     // 스토리의 시작 설정 전체(등록 순서, KNK-515 복수화). 상세 응답·정합 검사에 쓴다.
     fun findAllByStoryIdOrderByIdAsc(storyId: Long): List<StoryStartSetting>
 
+    // 위와 같은 순서를 스토리 묶음으로(스토리 안에서 등록 순서).
+    fun findAllByStoryIdInOrderByStoryIdAscIdAsc(storyIds: Collection<Long>): List<StoryStartSetting>
+
     // 스토리의 기본(첫) 시작 설정. POST /chats에서 startSettingId 미지정 시 폴백.
     fun findFirstByStoryIdOrderByIdAsc(storyId: Long): StoryStartSetting?
 

@@ -81,9 +81,17 @@ class StorySubmissionService(
     @Transactional(readOnly = true)
     fun get(id: String, userId: Long): Map<String, Any?> = response(owned(id, userId))
 
+    /** 항목은 상세와 같다. 스토리와 수정본의 현재 폼은 행마다가 아니라 한 번에 읽는다(KNK-2077). */
     @Transactional(readOnly = true)
-    fun list(userId: Long, limit: Int): List<Map<String, Any?>> = submissions
-        .findByUserIdAndStatusNotOrderByCreatedAtDescIdDesc(userId, SubmissionStatus.APPROVED, PageRequest.of(0, limit.coerceIn(1, 100))).map(::response)
+    fun list(userId: Long, limit: Int): List<Map<String, Any?>> {
+        val rows = submissions.findByUserIdAndStatusNotOrderByCreatedAtDescIdDesc(userId, SubmissionStatus.APPROVED, PageRequest.of(0, limit.coerceIn(1, 100)))
+        val storyIds = rows.mapNotNull { it.storyId }.distinct()
+        val storiesById = if (storyIds.isEmpty()) emptyMap() else stories.findAllById(storyIds).associateBy { it.id }
+        // 승인본이 아닌 수정본은 현재 스토리에 요청을 적용해 복원한다(currentForm). 그 바탕 폼을 행 순서대로 판정하며 묶어 읽는다.
+        val liveForms = edit.getEditForms(rows.filter { it.kind == SubmissionKind.UPDATE && it.status != SubmissionStatus.APPROVED }
+            .mapNotNull { storiesById[it.storyId] }.distinct(), userId)
+        return rows.map { response(it, it.storyId?.let(storiesById::get), it.storyId?.let(liveForms::get)) }
+    }
 
     @Transactional(readOnly = true)
     fun editForm(storyId: String, userId: Long?): JsonNode {
@@ -114,9 +122,9 @@ class StorySubmissionService(
 
     private fun accept(row: StorySubmission) = SubmissionAccepted(row.publicId.toString())
 
-    private fun response(row: StorySubmission): Map<String, Any?> {
-        val form = restoredForm(row)
-        return linkedMapOf("submissionId" to row.publicId.toString(), "storyId" to row.storyId?.let { stories.findById(it).orElse(null)?.publicId?.toString() },
+    private fun response(row: StorySubmission, story: Story? = null, liveForm: StoryEditFormResponse? = null): Map<String, Any?> {
+        val form = restoredForm(row, story, liveForm)
+        return linkedMapOf("submissionId" to row.publicId.toString(), "storyId" to row.storyId?.let { (story ?: stories.findById(it).orElse(null))?.publicId?.toString() },
             "kind" to row.kind, "payload" to form, "status" to row.status,
             "issues" to forms.remap(row.issues, mapper.readTree(row.inputForm), form), "errorCode" to row.errorCode,
             "imageErrors" to forms.remapImageErrors(row.imageErrors, mapper.readTree(row.inputForm), form),
@@ -124,16 +132,16 @@ class StorySubmissionService(
     }
 
     /** 소유자 상세와 관리자 상세가 같은 복원 규칙을 사용한다. */
-    internal fun restoredForm(row: StorySubmission): tools.jackson.databind.node.ObjectNode {
-        val form = if (row.status == SubmissionStatus.APPROVED) mapper.readTree(row.inputForm) as tools.jackson.databind.node.ObjectNode else currentForm(row)
+    internal fun restoredForm(row: StorySubmission, story: Story? = null, liveForm: StoryEditFormResponse? = null): tools.jackson.databind.node.ObjectNode {
+        val form = if (row.status == SubmissionStatus.APPROVED) mapper.readTree(row.inputForm) as tools.jackson.databind.node.ObjectNode else currentForm(row, story, liveForm)
         form.remove("submission")
         return form
     }
 
-    private fun currentForm(row: StorySubmission): tools.jackson.databind.node.ObjectNode = when (row.kind) {
+    private fun currentForm(row: StorySubmission, story: Story? = null, liveForm: StoryEditFormResponse? = null): tools.jackson.databind.node.ObjectNode = when (row.kind) {
         SubmissionKind.CREATE -> forms.create(mapper.readValue(row.payload, CreateGeneralStoryRequest::class.java), row.userId, false)
-        SubmissionKind.UPDATE -> forms.update(stories.findById(requireNotNull(row.storyId)).orElseThrow(),
-            mapper.readValue(row.payload, UpdateStoryRequest::class.java), row.userId, false, true)
+        SubmissionKind.UPDATE -> forms.update(story ?: stories.findById(requireNotNull(row.storyId)).orElseThrow(),
+            mapper.readValue(row.payload, UpdateStoryRequest::class.java), row.userId, false, true, liveForm = liveForm)
     }
 
     private fun requireMember(userId: Long) {

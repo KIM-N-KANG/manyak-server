@@ -75,6 +75,19 @@ class StoryEditService(
         return buildEditForm(story)
     }
 
+    /**
+     * 이미 읽은 스토리들의 수정 폼(내 제출본 목록). 스토리마다 [getEditForm]과 같은 판정(삭제는 404, 타인은 403)을 순서대로 하고,
+     * 하위 데이터는 스토리 수와 무관한 조회 수로 읽는다.
+     */
+    @Transactional(readOnly = true)
+    fun getEditForms(stories: Collection<Story>, userId: Long?): Map<Long, StoryEditFormResponse> {
+        stories.forEach { story ->
+            if (story.deletedAt != null) throw ResponseStatusException(HttpStatus.NOT_FOUND, "스토리를 찾을 수 없습니다.")
+            requireOwnerAccess(story, userId)
+        }
+        return buildEditForms(stories)
+    }
+
     /** 관리자 스토리 설정(ADMIN 4-2-7) 전용. 삭제된 스토리도 찾아 현재 저장값 조립만 재사용한다. 소유권과 삭제 게이트 없음. 없으면 null. */
     @Transactional(readOnly = true)
     fun getCurrentForm(publicId: UUID): CurrentStoryForm? =
@@ -439,13 +452,29 @@ class StoryEditService(
         const val MAX_IMAGE_NAME_LENGTH = 120
     }
 
-    private fun buildEditForm(story: Story): StoryEditFormResponse {
-        val setting = storySettingRepository.findByStoryId(story.id)
-        // 시작 설정 복수화(KNK-515): 등록 순서로 전부 싣고, 추천 입력·엔딩은 각 시작 설정에 종속시킨다.
-        val startSettings = startSettingResponseAssembler.assemble(story.id)
-        val mainEvents = storyMainEventRepository.findByStoryIdOrderBySortOrderAsc(story.id)
-            .map { it.toMainEventResponse() }
+    private fun buildEditForm(story: Story): StoryEditFormResponse = buildEditForms(listOf(story)).getValue(story.id)
 
+    /** 한 스토리든 여러 스토리든 같은 조립을 쓴다. 하위 테이블마다 한 번씩 읽는다. */
+    private fun buildEditForms(stories: Collection<Story>): Map<Long, StoryEditFormResponse> {
+        if (stories.isEmpty()) return emptyMap()
+        val ids = stories.map { it.id }.distinct()
+        val settings = storySettingRepository.findByStoryIdIn(ids).associateBy { it.story.id }
+        // 시작 설정 복수화(KNK-515): 등록 순서로 전부 싣고, 추천 입력·엔딩은 각 시작 설정에 종속시킨다.
+        val startSettings = startSettingResponseAssembler.assembleAll(ids)
+        val mainEvents = storyMainEventRepository.findByStoryIdInOrderByStoryIdAscSortOrderAsc(ids)
+            .groupBy({ it.story.id }, { it.toMainEventResponse() })
+        val characters = buildEditCharacters(ids)
+        return stories.associate { story -> story.id to buildEditForm(story, settings[story.id], startSettings[story.id].orEmpty(),
+            mainEvents[story.id].orEmpty(), characters[story.id].orEmpty()) }
+    }
+
+    private fun buildEditForm(
+        story: Story,
+        setting: com.knk.manyak.story.entity.StorySetting?,
+        startSettings: List<com.knk.manyak.story.dto.StoryStartSettingResponse>,
+        mainEvents: List<com.knk.manyak.story.dto.StoryMainEventResponse>,
+        characters: List<StoryEditCharacterResponse>,
+    ): StoryEditFormResponse {
         return StoryEditFormResponse(
             protagonistName = story.protagonistName,
             title = story.title,
@@ -465,19 +494,19 @@ class StoryEditService(
             // 적용하지 않는다** — 소유자 화면이라 상태와 함께 원본을 보여야 한다.
             thumbnailUrl = imageUrlResolver.thumbnailUrlFor(story.thumbnailImageUrl, story.thumbnailImageKey),
             thumbnailModerationStatus = story.thumbnailModerationStatus,
-            characters = buildEditCharacters(story.id),
+            characters = characters,
         )
     }
 
     /** 편집 화면의 인물·이미지 목록(KNK-1126). 이미지를 한 번에 읽어 인물 수만큼 쿼리가 늘지 않게 한다. */
-    private fun buildEditCharacters(storyId: Long): List<StoryEditCharacterResponse> {
-        val characters = storyCharacterRepository.findByStoryIdOrderByIdAsc(storyId)
+    private fun buildEditCharacters(storyIds: Collection<Long>): Map<Long, List<StoryEditCharacterResponse>> {
+        val characters = storyCharacterRepository.findByStoryIdInOrderByStoryIdAscIdAsc(storyIds)
         if (characters.isEmpty()) {
-            return emptyList()
+            return emptyMap()
         }
-        val imagesByCharacterId = storyCharacterImageRepository.findAllByStoryId(storyId)
+        val imagesByCharacterId = storyCharacterImageRepository.findAllByStoryIdIn(storyIds)
             .groupBy { it.character.id }
-        return characters.map { character ->
+        return characters.groupBy { it.story.id }.mapValues { (_, storyCharacters) -> storyCharacters.map { character ->
             StoryEditCharacterResponse(
                 id = character.publicId.toString(),
                 name = character.name,
@@ -492,7 +521,7 @@ class StoryEditService(
                     )
                 },
             )
-        }
+        } }
     }
 
     /**

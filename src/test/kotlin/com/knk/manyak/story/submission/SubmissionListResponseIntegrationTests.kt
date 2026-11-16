@@ -46,6 +46,7 @@ class SubmissionListResponseIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var mapper: ObjectMapper
     @Autowired private lateinit var cleaner: DatabaseCleaner
     @Autowired @Qualifier("storyModerationExecutor") private lateinit var executor: Executor
+    @Autowired private lateinit var registry: io.micrometer.observation.ObservationRegistry
 
     @BeforeEach fun setup() {
         com.knk.manyak.support.stopExecuting(executor)
@@ -151,5 +152,22 @@ class SubmissionListResponseIntegrationTests : MockedBoundaryIntegrationTest() {
         assertThat(create["storyId"].isNull).isTrue()
         assertThat(create["issues"].texts("path")).containsExactly("characters[0].images[0].imageUrl", "title")
         assertThat(create["imageErrors"].texts("path")).containsExactly("thumbnailUrl")
+    }
+
+    @Test fun `목록의 조회 수는 수정본 수와 무관하다`() {
+        com.knk.manyak.auth.service.LockSql.install(registry)
+        val author = users.save(User(nickname = "작가"))
+        service.create(createRequest(author, "등록", listOf("하나" to 1)), author.id)
+        fun addUpdates(count: Int) = repeat(count) {
+            val story = approvedStory(author, createRequest(author, "라이브$it", listOf("세린" to 2, "루아" to 1), starts = 2))
+            service.update(story.publicId.toString(), UpdateStoryRequest(title = "수정$it"), author.id)
+        }
+        addUpdates(2)
+        val two = com.knk.manyak.auth.service.LockSql.statements { service.list(author.id, 100) }
+        addUpdates(3)
+        val five = com.knk.manyak.auth.service.LockSql.statements { service.list(author.id, 100) }
+        assertThat(service.list(author.id, 100)).hasSize(6)
+        assertThat(five).isEqualTo(two)
+        assertThat(two).hasSizeLessThanOrEqualTo(10)
     }
 }
