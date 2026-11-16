@@ -19,10 +19,14 @@ class StartSettingResponseAssembler(
     private val storySuggestedInputRepository: StorySuggestedInputRepository,
     private val storyEndingRepository: StoryEndingRepository,
 ) {
-    fun assemble(storyId: Long): List<StoryStartSettingResponse> {
-        val startSettings = storyStartSettingRepository.findAllByStoryIdOrderByIdAsc(storyId)
+    fun assemble(storyId: Long): List<StoryStartSettingResponse> = assembleAll(listOf(storyId))[storyId].orEmpty()
+
+    /** [assemble]을 스토리 묶음으로. 스토리 수와 무관하게 시작 설정, 추천 입력, 엔딩을 한 번씩 읽는다. 시작 설정이 없는 스토리는 키가 없다. */
+    fun assembleAll(storyIds: Collection<Long>): Map<Long, List<StoryStartSettingResponse>> {
+        if (storyIds.isEmpty()) return emptyMap()
+        val startSettings = storyStartSettingRepository.findAllByStoryIdInOrderByStoryIdAscIdAsc(storyIds)
         if (startSettings.isEmpty()) {
-            return emptyList()
+            return emptyMap()
         }
         val startSettingIds = startSettings.map { it.id }
         val inputsByStartSettingId = storySuggestedInputRepository
@@ -31,7 +35,7 @@ class StartSettingResponseAssembler(
         val endingsByStartSettingId = storyEndingRepository
             .findByStartSettingIdInAndEnabledTrueOrderByStartSettingIdAscSortOrderAsc(startSettingIds)
             .groupBy { it.startSetting.id }
-        return startSettings.map { startSetting ->
+        return startSettings.groupBy { it.story.id }.mapValues { (_, settings) -> settings.map { startSetting ->
             StoryStartSettingResponse(
                 id = startSetting.publicId.toString(),
                 name = startSetting.name,
@@ -40,6 +44,6 @@ class StartSettingResponseAssembler(
                 suggestedInputs = inputsByStartSettingId[startSetting.id].orEmpty(),
                 endings = endingsByStartSettingId[startSetting.id].orEmpty().map { it.toEndingResponse() },
             )
-        }
+        } }
     }
 }

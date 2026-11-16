@@ -26,4 +26,15 @@ interface StoryCharacterImageRepository : JpaRepository<StoryCharacterImage, Lon
         """,
     )
     fun findAllByStoryId(@Param("storyId") storyId: Long): List<StoryCharacterImage>
+
+    /** [findAllByStoryId]를 스토리 묶음으로. 스토리 안의 순서가 같다(인물 id가 스토리를 가르므로 인물 등록순 → 이미지 표시순). */
+    @Query(
+        """
+        SELECT i FROM StoryCharacterImage i
+        JOIN FETCH i.character c
+        WHERE c.story.id IN :storyIds
+        ORDER BY c.id ASC, i.sortOrder ASC, i.id ASC
+        """,
+    )
+    fun findAllByStoryIdIn(@Param("storyIds") storyIds: Collection<Long>): List<StoryCharacterImage>
 }
