@@ -49,6 +49,10 @@ manyak:
     # 실제로 공급받아야 하는 값**이라 env가 이겨야 한다. 이 기본값은 잠금이 아니라 주입 부재에 대한 fail-safe다.
     # (form-id는 개발이 어떤 값도 가지면 안 되는 값이라 잠그는 게 맞다.)
     profile-preset-base-url: ${MANYAK_ASSET_BASE_URL:https://dev-api.manyak.app}
+  push:
+    # 알림 딥링크와 웹 푸시 클릭 링크의 기준 주소다. application.yml 기본값이 운영 웹(https://manyak.app)이라
+    # 주입이 없으면 개발 알림이 운영 웹을 연다. asset과 같이 env가 이기는 fail-safe 기본값으로 둔다(KNK-2090).
+    web-base-url: ${MANYAK_PUSH_WEB_BASE_URL:https://dev.manyak.app}
 
 sentry:
   # 이 값은 Sentry 환경 구분이자 manyak-ai의 Langfuse 활성화 가드 입력이다(운영 Langfuse(JP)로 개발 프롬프트가
@@ -70,4 +74,6 @@ sentry:
 # - management.health.redis.enabled : Spring 기본 true. prod만 배포 사정으로 false다.
 # - manyak.asset.image-base-url : 운영 CDN 기본값을 그대로 쓴다. 읽기 전용 조회용이고 DB에 저장되지 않아
 #   오염 경로가 아니다(profile-preset-base-url과 성격이 다르다).
+# - manyak.push.web.icon-url : 개발 웹은 배포 보호 뒤에 있어 아이콘 주소가 로그인 리다이렉트(302)라
+#   알림 아이콘으로 쓸 수 없다. 운영 아이콘 기본값을 그대로 쓴다(KNK-2090).
 # - DB 크리덴셜·CORS 오리진·JWT/OAuth 시크릿·Amplitude 키 : 환경별 값이라 환경변수로만 주입한다.
