@@ -63,9 +63,10 @@ X-Manyak-Session-Id: sess-manual-2
 %}
 
 ### 3. 필수 헤더(device·session)가 없어도 4xx로 막지 않고 200을 반환한다 (관대 처리)
-# 수동 확인: 이 요청을 보낸 뒤 서버 콘솔 로그에
-#   WARN ... 필수 추적 헤더 누락: missing=[X-Manyak-Device-Id, X-Manyak-Session-Id], method=GET, path=/api/v1/stories/simple/tags
-# 가 한 줄 찍히는지 눈으로 확인하세요. (분석 신호 누락이 제품 가용성을 깨지 않는다는 정책)
+# 수동 확인: 기본 로그 수준(INFO)에서는 서버 콘솔에 WARN이 남지 않아야 합니다(KNK-2096에서 DEBUG로 내림).
+# 서버를 LOGGING_LEVEL_COM_KNK_MANYAK_GLOBAL_OBSERVABILITY=DEBUG(패키지 단위)로 띄우면
+#   DEBUG ... 필수 추적 헤더 누락: missing=[X-Manyak-Device-Id, X-Manyak-Session-Id], method=GET, path=/api/v1/stories/simple/tags
+# 가 한 줄 찍힙니다. (분석 신호 누락이 제품 가용성을 깨지 않는다는 정책)
 GET {{baseUrl}}/api/v1/stories/simple/tags
 Accept: application/json
 X-Manyak-Request-Id: req_manual_check_3

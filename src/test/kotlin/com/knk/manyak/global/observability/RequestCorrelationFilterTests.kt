@@ -157,20 +157,28 @@ class RequestCorrelationFilterTests {
     }
 
     @Test
-    fun `필수 헤더(device·session)가 없으면 unknown으로 채우고 경고를 남긴다`() {
+    fun `필수 헤더(device·session)가 없으면 unknown으로 채우고 WARN 없이 DEBUG로만 남긴다`() {
+        // 클라이언트 계약상 일반 요청에서는 누락될 수 있다(웹 서버 쪽 호출, 관리자 웹). 필수인 엔드포인트는 따로 400으로 거절한다(KNK-2096).
         val logger = LoggerFactory.getLogger(RequestCorrelationFilter::class.java) as Logger
         val appender = ListAppender<ILoggingEvent>().apply { start() }
+        val previousLevel = logger.level
+        logger.level = Level.DEBUG
         logger.addAppender(appender)
         try {
-            val (mdc, _) = runFilter(request(requestId = "req_x"))
+            for (path in listOf("/api/v1/stories/simple/tags", "/api/v1/stories/home", "/api/v1/admin/members")) {
+                val (mdc, _) = runFilter(MockHttpServletRequest("GET", path).apply { addHeader("X-Manyak-Request-Id", "req_x") })
 
-            assertThat(mdc["session_id"]).isEqualTo("unknown")
-            assertThat(mdc["device_id_hash"]).isEqualTo("unknown")
+                assertThat(mdc["session_id"]).isEqualTo("unknown")
+                assertThat(mdc["device_id_hash"]).isEqualTo("unknown")
+            }
         } finally {
             logger.detachAppender(appender)
+            logger.level = previousLevel
+            appender.stop()
         }
 
-        assertThat(appender.list).anyMatch { it.level == Level.WARN }
+        assertThat(appender.list).noneMatch { it.level.isGreaterOrEqual(Level.WARN) }
+        assertThat(appender.list.filter { it.level == Level.DEBUG && it.formattedMessage.startsWith("필수 추적 헤더 누락") }).hasSize(3)
     }
 
     @Test

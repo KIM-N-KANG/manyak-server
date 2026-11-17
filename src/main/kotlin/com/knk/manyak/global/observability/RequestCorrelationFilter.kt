@@ -21,7 +21,7 @@ import java.util.UUID
  * 그래야 인증 거부(401/403) 요청도 request_id로 추적된다.
  *
  * 필수 헤더(device/session)가 없어도 요청을 막지 않는다. 분석 신호 누락이 제품 가용성을 깨면
- * 안 되므로 unknown으로 채우고 경고만 남긴다. request_id는 없으면 생성한다.
+ * 안 되므로 unknown으로 채우고 DEBUG 로그만 남긴다. request_id는 없으면 생성한다.
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -46,7 +46,7 @@ class RequestCorrelationFilter(
             null
         }
 
-        warnIfRequiredHeadersMissing(request, rawSessionId, rawDeviceId)
+        logIfRequiredHeadersMissing(request, rawSessionId, rawDeviceId)
 
         response.setHeader(HEADER_REQUEST_ID, requestId)
         MDC.put(MdcKeys.REQUEST_ID, requestId)
@@ -62,12 +62,12 @@ class RequestCorrelationFilter(
         }
     }
 
-    private fun warnIfRequiredHeadersMissing(
+    private fun logIfRequiredHeadersMissing(
         request: HttpServletRequest,
         rawSessionId: String?,
         rawDeviceId: String?,
     ) {
-        // 이 경고의 목적은 "프론트엔드가 실제 API 호출에서 추적 헤더를 빠뜨림"을 잡는 것이다.
+        // 이 로그의 목적은 "프론트엔드가 실제 API 호출에서 추적 헤더를 빠뜨림"을 잡는 것이다.
         // 비즈니스 API(/api/*) 밖의 경로는 헬스체크(ALB, ECS)와 취약점 스캐너 등 기계 트래픽이라
         // 헤더가 없는 게 정상이고, 경고를 찍으면 로그의 대부분을 노이즈로 채운다(실측 92%).
         // MDC unknown 적재와 request_id 발급은 경로와 무관하게 그대로 동작한다.
@@ -79,8 +79,10 @@ class RequestCorrelationFilter(
             if (rawDeviceId == null) add(HEADER_DEVICE_ID)
             if (rawSessionId == null) add(HEADER_SESSION_ID)
         }
+        // DEBUG다(KNK-2096). 클라이언트 계약상 일반 요청에서는 누락될 수 있고(웹 서버 쪽 호출, 관리자 웹이 대부분),
+        // 헤더가 필수인 엔드포인트는 각자 400으로 거절하므로 WARN은 정상 호출과 문제를 가려 주지 못한다.
         if (missing.isNotEmpty()) {
-            log.warn(
+            log.debug(
                 "필수 추적 헤더 누락: missing={}, method={}, path={}",
                 missing,
                 request.method,
