@@ -1,5 +1,6 @@
 package com.knk.manyak.push
 
+import com.knk.manyak.support.forwardInsertAllToInsert
 import com.google.firebase.messaging.AndroidConfig.Priority.HIGH
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.entity.*
@@ -57,6 +58,7 @@ class CreditExpiryReminderIntegrationTests : PushRemoteIntegrationTest() {
         cleaner.cleanAll()
         redis.keys("push:credit-expiry-reminder:*").orEmpty().let { if (it.isNotEmpty()) redis.delete(it) }
         reset(store, sender)
+        store.forwardInsertAllToInsert()
         messages.clear()
         text.refresh()
         jdbc.execute("CREATE TABLE IF NOT EXISTS credit_expiry_outbox_probe(message_id VARCHAR(255) PRIMARY KEY)")
@@ -186,7 +188,8 @@ class CreditExpiryReminderIntegrationTests : PushRemoteIntegrationTest() {
     @Test fun `쿨다운 조회 장애는 아무 요청도 기록하지 않고 회차 실패를 남긴다`() {
         lot(member())
         val failed = mock(StringRedisTemplate::class.java)
-        `when`(failed.hasKey(anyString())).thenThrow(IllegalStateException("unavailable"))
+        // 쿨다운은 MGET 한 번으로 읽는다(KNK-2077).
+        `when`(failed.opsForValue()).thenThrow(IllegalStateException("unavailable"))
         val log = mock(StructuredLogger::class.java)
         CreditExpiryReminderScheduler(service(cache = failed), redis, log, clock).run()
         verify(log).event(eq("credit_expiry_reminder_failed") ?: "", any<Pair<String, Any?>>() ?: ("" to null))
@@ -215,7 +218,7 @@ class CreditExpiryReminderIntegrationTests : PushRemoteIntegrationTest() {
         lot(member())
         val failed = mock(StringRedisTemplate::class.java)
         val values = mock(org.springframework.data.redis.core.ValueOperations::class.java) as org.springframework.data.redis.core.ValueOperations<String, String>
-        `when`(failed.hasKey(anyString())).thenReturn(false)
+        doReturn(listOf<String?>(null)).`when`(values).multiGet(anyCollection())
         `when`(failed.opsForValue()).thenReturn(values)
         doThrow(IllegalStateException("unavailable")).`when`(values).set(anyString(), eq("1") ?: "1", eq(Duration.ofDays(7)) ?: Duration.ofDays(7))
         val log = mock(StructuredLogger::class.java)

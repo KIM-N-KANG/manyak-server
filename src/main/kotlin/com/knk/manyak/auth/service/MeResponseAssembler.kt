@@ -27,7 +27,8 @@ class MeResponseAssembler(
         status = user.status,
         // 세션 부트스트랩 확장(스펙 §4-3-5 B17): 프론트엔드가 세션 복원 1회 왕복으로 헤더 잔액·출석 UI를 그린다.
         creditBalance = creditSummary.balanceOf(user.id),
-        attendedToday = creditSummary.hasAttendedToday(user.id),
+        // 출석 키는 보상 신원으로 잡는다(KNK-1053). 이미 읽은 회원 행의 값을 넘겨 users를 다시 읽지 않는다(KNK-2091).
+        attendedToday = creditSummary.hasAttendedToday(user.rewardIdentityUserId ?: user.id),
         // 계정 연동 상태(KNK-739). 전용 조회 엔드포인트를 두지 않고 이 응답 하나로 노출한다(왕복을 늘리지 않는다).
         linkedProviders = accountLinkService.linkedProviders(user.id),
     )

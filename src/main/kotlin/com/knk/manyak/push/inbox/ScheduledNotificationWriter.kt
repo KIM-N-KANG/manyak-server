@@ -32,16 +32,16 @@ class ScheduledNotificationWriter(
     ): NotificationRound {
         val now = clock.instant()
         val type = NotificationType.CREDIT_EXPIRY_REMINDER
-        val publicIds = accounts.requirePublicIdsOf(inboxTargets.map { it.userId })
-        for (target in inboxTargets) {
-            val publicId = publicIds.getValue(target.userId)
-            store.insert(UserNotification(userId = target.userId, messageKey = "credit-expiry:$publicId:$occurrence",
+        // 원격 모드는 알림함과 발송 요청이 같은 변환을 쓴다. 대상이 사라졌으면 기록 전에 실패한다.
+        val publicIds = accounts.requirePublicIdsOf((inboxTargets + if (outbox != null) pushTargets else emptyList()).map { it.userId })
+        store.insertAll(inboxTargets.map { target ->
+            UserNotification(userId = target.userId, messageKey = "credit-expiry:${publicIds.getValue(target.userId)}:$occurrence",
                 type = type, title = data.getValue("title"), body = data.getValue("body"),
-                deepLink = data.getValue("deepLink"), createdAt = now))
-        }
+                deepLink = data.getValue("deepLink"), createdAt = now)
+        })
         val targetIds = pushTargets.map { it.userId }
         val sent = outbox?.record(targetIds, data, "credit-expiry", occurrence, kind = "SERVICE",
-            expiresAtByUserId = pushTargets.associate { it.userId to it.expiresAt })
+            expiresAtByUserId = pushTargets.associate { it.userId to it.expiresAt }, knownPublicIds = publicIds)
         return NotificationRound(targetIds, sent)
     }
 

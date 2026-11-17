@@ -40,7 +40,7 @@ class CreditExpiryReminderService(
         val until = now.plus(Duration.ofHours(24))
         val candidates = wallet.expiryReminderTargets(now, until)
         // 조회 실패는 기록 전에 전파해 부분 요청이 남지 않게 한다.
-        val cooling = candidates.filter { redis.hasKey(cooldownKey(it.userId)) }.map { it.userId }.toSet()
+        val cooling = coolingUserIds(candidates.map { it.userId })
         val targets = candidates.filter { it.userId !in cooling }
         val text = templates.templateOf(PushTemplateKey.CREDIT_EXPIRY_REMINDER)
         val data = mapOf("type" to TYPE, "title" to text.title, "body" to text.body,
@@ -77,6 +77,14 @@ class CreditExpiryReminderService(
             }
         }
         return CreditExpiryReminderResult(candidates.size, candidates.count { it.userId in cooling }, sent)
+    }
+
+    /** 후보 전원의 쿨다운 키를 MGET 한 번으로 읽는다. 결과가 키 수와 다르면 조회 실패로 본다. */
+    private fun coolingUserIds(userIds: List<Long>): Set<Long> {
+        if (userIds.isEmpty()) return emptySet()
+        val values = redis.opsForValue().multiGet(userIds.map(::cooldownKey)).orEmpty()
+        check(values.size == userIds.size) { "쿨다운 조회 결과 수가 다르다" }
+        return userIds.filterIndexed { index, _ -> values[index] != null }.toSet()
     }
 
     private fun cooldownKey(userId: Long) = "push:credit-expiry-reminder:cooldown:$userId"

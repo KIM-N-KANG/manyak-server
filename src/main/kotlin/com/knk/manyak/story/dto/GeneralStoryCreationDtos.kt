@@ -37,8 +37,7 @@ data class CreateGeneralStoryRequest(
     @field:Schema(description = "주요 내용(선택).", nullable = true)
     val description: String? = null,
 
-    // 장르는 stories.genre(VARCHAR(255))에 쉼표 결합 저장하므로, 개수·길이 상한으로 컬럼 초과를 막는다.
-    // 최대 8개 × 30자 + 구분자 → 최대 254자 ≤ 255. 상한이 없으면 긴 입력이 검증(400)을 통과한 뒤 insert에서 500이 난다.
+    // 장르 1~8개, 각 30자 이하는 계약(STORY 4-2)이 정한 값이다. 상한을 넘는 입력은 저장 전에 400으로 거절한다.
     @field:Size(min = 1, max = 8, message = "장르는 1개 이상 8개 이하여야 합니다.")
     @field:Schema(description = "활성 제공 장르의 정식 이름 목록(1~8개, 각 30자 이내). 검색 별칭은 제출할 수 없습니다.", example = "[\"판타지\",\"미스터리\"]")
     val genres: List<@Size(max = 30, message = "각 장르는 30자를 넘을 수 없습니다.") String>,

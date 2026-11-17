@@ -21,5 +21,6 @@ interface MeCreditSummaryPort {
 
     fun balanceOf(userId: Long): Long
 
-    fun hasAttendedToday(userId: Long): Boolean
+    /** [rewardIdentityId]는 회원의 보상 신원(`rewardIdentityUserId ?: id`, KNK-1053)이다. 조립이 이미 읽은 회원 행에서 넘긴다. */
+    fun hasAttendedToday(rewardIdentityId: Long): Boolean
 }

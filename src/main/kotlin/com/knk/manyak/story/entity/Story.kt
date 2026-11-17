@@ -45,7 +45,7 @@ class Story(
     @Column(columnDefinition = "TEXT")
     var description: String? = null,
 
-    @Column(length = 255)
+    @Column(length = 700)
     var genre: String? = null,
 
     // 기존 스토리의 프리셋 표지 키. 새 등록에서는 채우지 않으며 표지 삭제 시 null로 만든다.

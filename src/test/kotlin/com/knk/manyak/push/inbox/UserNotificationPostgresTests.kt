@@ -176,6 +176,17 @@ class UserNotificationPostgresTests {
         assertThat(store.unreadCount(1).total).isZero()
     }
 
+    @Test fun `묶음 삽입은 단건 삽입과 같은 행을 남기고 충돌한 행은 무시한다`() {
+        jdbc.update("INSERT INTO users VALUES (2, ?, 'ACTIVE', NULL, NULL)", UUID.randomUUID())
+        fun row(userId: Long, key: String) = UserNotification(userId = userId, messageKey = key,
+            type = NotificationType.CREDIT_EXPIRY_REMINDER, title = "이프 만료 예정 안내", body = "곧 만료되는 이프가 있어요", createdAt = now)
+        tx.executeWithoutResult { store.insert(row(1, "credit-expiry:a:2026-10-24")) }
+        tx.executeWithoutResult { store.insertAll(listOf(row(1, "credit-expiry:a:2026-10-24"), row(2, "credit-expiry:b:2026-10-24"))) }
+        assertThat(jdbc.queryForList("SELECT user_id, message_key, category FROM user_notifications ORDER BY user_id"))
+            .extracting<String> { "${it["user_id"]}:${it["message_key"]}:${it["category"]}" }
+            .containsExactly("1:credit-expiry:a:2026-10-24:ACTIVITY", "2:credit-expiry:b:2026-10-24:ACTIVITY")
+    }
+
     @Test fun `회차의 조회 삽입은 광고와 보상 신원을 따르고 롤백과 재실행에 안전하다`() {
         jdbc.update("INSERT INTO users VALUES (2, ?, 'ACTIVE', NULL, NULL), (3, ?, 'SUSPENDED', ?, NULL), (4, ?, 'ACTIVE', ?, 9)",
             UUID.randomUUID(), UUID.randomUUID(), java.sql.Timestamp.from(now), UUID.randomUUID(), java.sql.Timestamp.from(now))
@@ -222,10 +233,7 @@ class UserNotificationPostgresTests {
             call.callRealMethod()
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM push_outbox", Long::class.java)).isEqualTo(1)
             error("outbox failed after insert")
-        }.`when`(failingOutbox).insert(
-            org.mockito.Mockito.any(com.knk.manyak.push.outbox.PushMessage::class.java)
-                ?: com.knk.manyak.push.outbox.PushMessage("", "", data = emptyMap(), requestId = "", sessionId = ""),
-            org.mockito.Mockito.any(Instant::class.java) ?: Instant.EPOCH)
+        }.`when`(failingOutbox).insertAll(org.mockito.Mockito.anyList(), org.mockito.Mockito.any(Instant::class.java) ?: Instant.EPOCH)
         val manager = DataSourceTransactionManager(jdbc.dataSource!!)
         org.springframework.context.annotation.AnnotationConfigApplicationContext().use { context ->
             context.environment.propertySources.addFirst(org.springframework.core.env.MapPropertySource("test", mapOf("manyak.push.web-base-url" to "https://manyak.app")))

@@ -7,6 +7,8 @@ import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.image.service.UploadedImageKind
 import com.knk.manyak.image.service.UploadedImageObjectKeys
 import com.knk.manyak.image.service.UploadedImageStorage
+import com.knk.manyak.image.service.UploadedObject
+import com.knk.manyak.image.service.UploadedObjectHeads
 import com.knk.manyak.story.entity.Story
 import com.knk.manyak.story.entity.StoryCharacter
 import com.knk.manyak.story.repository.StoryCharacterRepository
@@ -27,6 +29,7 @@ class StoryImageAccess(
     private val accounts: AccountQueryService,
     private val storyCharacterRepository: StoryCharacterRepository,
     private val uploadedImageStorage: UploadedImageStorage,
+    private val heads: UploadedObjectHeads,
 ) {
 
     /**
@@ -75,29 +78,57 @@ class StoryImageAccess(
         kind: UploadedImageKind,
         objectKey: String,
         onValidatedSize: (Long) -> Unit = {},
+        prefetched: Map<String, Result<UploadedObject?>> = emptyMap(),
     ): String =
         resolveUploadedUrlUnder(
-            // 스토리 경로와 **소유자의 draft 경로**를 모두 받는다(KNK-1391). 웹이 제작·수정 화면에서 같은
-            // 업로드 컴포넌트를 쓰면 수정 중에도 draft 키가 올라오는데, 내가 올린 객체라면 막을 이유가 없다.
-            expectedPrefixes = listOfNotNull(
-                "${UploadedImageObjectKeys.prefixOf(kind, story.publicId)}/",
-                ownerPublicId?.let { "${UploadedImageObjectKeys.draftPrefixOf(kind, it)}/" },
-            ),
+            expectedPrefixes = storyPrefixes(story, ownerPublicId, kind),
             objectKey = objectKey,
             mismatchMessage = "내가 이 스토리에 올린 업로드 이미지가 아닙니다.",
             onValidatedSize = onValidatedSize,
+            prefetched = prefetched,
         )
+
+    // 스토리 경로와 **소유자의 draft 경로**를 모두 받는다(KNK-1391). 웹이 제작, 수정 화면에서 같은
+    // 업로드 컴포넌트를 쓰면 수정 중에도 draft 키가 올라오는데, 내가 올린 객체라면 막을 이유가 없다.
+    private fun storyPrefixes(story: Story, ownerPublicId: UUID?, kind: UploadedImageKind) = listOfNotNull(
+        "${UploadedImageObjectKeys.prefixOf(kind, story.publicId)}/",
+        ownerPublicId?.let { "${UploadedImageObjectKeys.draftPrefixOf(kind, it)}/" },
+    )
+
+    private fun draftPrefixes(userPublicId: UUID, kind: UploadedImageKind) =
+        listOf("${UploadedImageObjectKeys.draftPrefixOf(kind, userPublicId)}/")
+
+    /**
+     * 제출 검증이 차례로 확인할 업로드 객체들의 HEAD를 미리 동시에 보낸다(KNK-2077). [story]가 없으면 등록 전 업로드다.
+     * 접두어 검사를 통과한 키만 HEAD한다(남의 키 존재를 HEAD로 알아내지 못하게). 판정은 하지 않으며, 결과를
+     * [resolveUploadedUrl], [resolveDraftUploadedUrl]의 `prefetched`로 넘기면 순차로 돌릴 때와 같은 위치에서 같은 오류를 낸다.
+     * 처음 실패하거나 없는 키 뒤의 결과는 담지 않는다([UploadedObjectHeads.headUntilMissing]).
+     * 업로드가 꺼졌거나 회원이 없으면 아무것도 하지 않는다(그 오류도 순차 검증이 낸다).
+     */
+    fun prefetchUploaded(story: Story?, userId: Long, objects: List<Pair<UploadedImageKind, String>>): Map<String, Result<UploadedObject?>> {
+        if (objects.size < 2 || !uploadedImageStorage.isEnabled()) return emptyMap()
+        val owner = accounts.publicIdOf(userId) ?: return emptyMap()
+        val keys = objects.filter { (kind, key) ->
+            val prefixes = if (story == null) draftPrefixes(owner, kind) else storyPrefixes(story, owner, kind)
+            runCatching { requirePrefix(prefixes, key, "") }.isSuccess
+        }.map { it.second }
+        return heads.headUntilMissing(keys)
+    }
 
     /**
      * 등록 전 업로드(일반 제작, KNK-1390)의 객체 키 검증. 스토리가 아직 없으니 소유는 사용자 공개 식별자로
      * 가른다. 그 밖의 규칙(HEAD 존재·5MB·형식)은 스토리 스코프와 같다.
      */
-    fun resolveDraftUploadedUrl(userPublicId: UUID, kind: UploadedImageKind, objectKey: String, onValidatedSize: (Long) -> Unit = {}): String =
+    fun resolveDraftUploadedUrl(
+        userPublicId: UUID, kind: UploadedImageKind, objectKey: String, onValidatedSize: (Long) -> Unit = {},
+        prefetched: Map<String, Result<UploadedObject?>> = emptyMap(),
+    ): String =
         resolveUploadedUrlUnder(
-            expectedPrefixes = listOf("${UploadedImageObjectKeys.draftPrefixOf(kind, userPublicId)}/"),
+            expectedPrefixes = draftPrefixes(userPublicId, kind),
             objectKey = objectKey,
             mismatchMessage = "내가 올린 업로드 이미지가 아닙니다.",
             onValidatedSize = onValidatedSize,
+            prefetched = prefetched,
         )
 
     /** 초안 저장·조회는 객체 존재와 메타데이터를 검사하지 않는다. */
@@ -132,10 +163,12 @@ class StoryImageAccess(
         objectKey: String,
         mismatchMessage: String,
         onValidatedSize: (Long) -> Unit,
+        prefetched: Map<String, Result<UploadedObject?>>,
     ): String {
         requireUploadEnabled()
         requirePrefix(expectedPrefixes, objectKey, mismatchMessage)
-        val uploaded = uploadedImageStorage.head(objectKey)
+        // 미리 받은 HEAD 결과가 있으면 그것으로 판정한다. HEAD가 던졌다면 여기서 같은 예외를 던진다.
+        val uploaded = (prefetched[objectKey]?.getOrThrow() ?: if (objectKey in prefetched) null else uploadedImageStorage.head(objectKey))
             ?: throw CodedResponseStatusException(
                 HttpStatus.BAD_REQUEST,
                 ApiErrorCodes.UPLOAD_NOT_FOUND,

@@ -4,6 +4,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.config.YamlPropertiesFactoryBean
 import org.springframework.core.io.ClassPathResource
+import org.springframework.util.PropertyPlaceholderHelper
 
 /**
  * KNK-828: 개발(dev) 프로파일이 운영 리소스를 가리키거나 스텁으로 응답하지 않는지 가드한다.
@@ -45,6 +46,15 @@ class DevProfileConfigTests {
             .isNotNull()
             .asString()
             .doesNotContain("https://api.manyak.app")
+    }
+
+    @Test
+    fun `개발 프로파일의 알림 딥링크 기준 주소는 주입이 없으면 개발 웹이다`() {
+        // KNK-2090: 생략하면 application.yml 기본값(운영 웹)이 살아 개발 알림이 운영 웹을 연다.
+        // 환경변수가 없을 때의 값을 보려고 placeholder를 기본값으로만 푼다.
+        val raw = devProperties.getProperty("manyak.push.web-base-url")
+        val resolved = raw?.let { PropertyPlaceholderHelper("\${", "}", ":", null, false).replacePlaceholders(it) { null } }
+        assertThat(resolved).isEqualTo("https://dev.manyak.app")
     }
 
     @Test

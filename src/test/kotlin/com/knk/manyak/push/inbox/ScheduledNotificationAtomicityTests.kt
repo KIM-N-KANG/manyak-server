@@ -1,5 +1,6 @@
 package com.knk.manyak.push.inbox
 
+import com.knk.manyak.support.forwardInsertAllToInsert
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.repository.UserRepository
 import com.knk.manyak.global.observability.StructuredLogger
@@ -37,6 +38,7 @@ class ScheduledNotificationAtomicityTests : PushRemoteIntegrationTest() {
     @Autowired private lateinit var sender: FcmPushSender
 
     @BeforeEach fun setup() {
+        outbox.forwardInsertAllToInsert()
         // Flyway off인 H2에는 JDBC 전용 아웃박스 테이블이 없다. 트랜잭션 참여를 확인할 저장 대역을 둔다.
         // 실제 PostgreSQL INSERT 문법은 UserNotificationPostgresTests가 검증한다.
         jdbc.execute("CREATE TABLE IF NOT EXISTS notification_outbox_probe(message_id VARCHAR(255) PRIMARY KEY)")

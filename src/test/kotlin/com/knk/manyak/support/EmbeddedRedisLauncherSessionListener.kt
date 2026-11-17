@@ -25,13 +25,29 @@ class EmbeddedRedisLauncherSessionListener : LauncherSessionListener {
 
     override fun launcherSessionOpened(session: LauncherSession) {
         if (redisServer != null) return
-        val port = ServerSocket(0).use { it.localPort }
-        System.setProperty("spring.data.redis.port", port.toString())
-        redisServer = RedisServer.newRedisServer().port(port).build().also { it.start() }
+        // 빈 포트를 고른 뒤 Redis가 그 포트를 잡기 전에 다른 포크가 먼저 잡을 수 있다(KNK-2059). 기동이 실패하면 새 포트로 다시 한다.
+        // 임베디드 Redis는 기본으로 127.0.0.1에만 연다(lsof로 확인).
+        var last: Exception? = null
+        repeat(START_ATTEMPTS) {
+            val port = ServerSocket(0).use { it.localPort }
+            val server = RedisServer.newRedisServer().port(port).build()
+            try {
+                server.start()
+            } catch (e: Exception) {
+                last = e
+                return@repeat
+            }
+            System.setProperty("spring.data.redis.port", port.toString())
+            redisServer = server
+            return
+        }
+        throw IllegalStateException("임베디드 Redis를 ${START_ATTEMPTS}번 시도했지만 띄우지 못했다", last)
     }
 
     override fun launcherSessionClosed(session: LauncherSession) {
         redisServer?.stop()
         redisServer = null
     }
+
+    private companion object { const val START_ATTEMPTS = 3 }
 }

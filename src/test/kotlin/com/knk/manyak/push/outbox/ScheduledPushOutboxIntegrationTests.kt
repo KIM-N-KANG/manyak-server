@@ -1,5 +1,6 @@
 package com.knk.manyak.push.outbox
 
+import com.knk.manyak.support.forwardInsertAllToInsert
 import com.knk.manyak.auth.entity.User
 import com.knk.manyak.auth.dto.UserStatus
 import com.knk.manyak.auth.repository.UserRepository
@@ -46,6 +47,7 @@ class ScheduledPushOutboxIntegrationTests : PushRemoteIntegrationTest() {
     @BeforeEach fun setup() {
         cleaner.cleanAll()
         reset(store, sender)
+        store.forwardInsertAllToInsert()
         messages.clear()
         doAnswer { invocation ->
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isTrue()

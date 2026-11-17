@@ -9,6 +9,9 @@ interface StoryMainEventRepository : JpaRepository<StoryMainEvent, Long> {
     // 스토리의 주요 사건을 표시 순서로 조회한다(상세·목록 응답, 교체 저장 후 반환).
     fun findByStoryIdOrderBySortOrderAsc(storyId: Long): List<StoryMainEvent>
 
+    // 위와 같은 순서를 스토리 묶음으로(스토리 안에서 표시 순서).
+    fun findByStoryIdInOrderByStoryIdAscSortOrderAsc(storyIds: Collection<Long>): List<StoryMainEvent>
+
     // 채팅 런타임: AI가 이름으로 지목한 목표·완결 사건을 id로 해소한다(이름은 사건 식별자, §4-3-10).
     fun findFirstByStoryIdAndName(storyId: Long, name: String): StoryMainEvent?
 

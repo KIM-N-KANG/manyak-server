@@ -873,6 +873,56 @@ class StoryControllerIntegrationTests : ScriptedAiIntegrationTest() {
             .jsonPath("$.code").isEqualTo("BAD_REQUEST")
             .jsonPath("$.message").isEqualTo("사용할 수 없는 태그 ID가 포함되어 있습니다: 999999")
             .jsonPath("$.path").isEqualTo("/api/v1/stories/simple/storylines")
+            .jsonPath("$.details.length()").isEqualTo(1)
+            .jsonPath("$.details[0].field").isEqualTo("genreTagIds[0]")
+    }
+
+    @Test
+    fun `무효 태그 ID는 없는 ID, 비활성, 다른 범주 모두 원본 자리마다 details에 담는다`() {
+        // KNK-2089, STORY 5-3-1: 서비스가 판정한 400도 필드가 특정되면 details에 원본 인덱스 경로를 싣는다.
+        val genre = seedTag(SimpleStoryTagCategory.GENRE, "판타지", 10)
+        val protagonistTag = seedTag(SimpleStoryTagCategory.PROTAGONIST, "기억상실", 10)
+        val supportingTag = seedTag(SimpleStoryTagCategory.SUPPORTING_CHARACTER, "비밀스러운 조력자", 10)
+        val inactive = tagRepository.save(
+            StoryCreationTag(
+                category = SimpleStoryTagCategory.SUPPORTING_CHARACTER,
+                name = "비활성 조력자",
+                tagSource = StoryCreationTagSource.PREDEFINED,
+                sortOrder = 20,
+                isActive = false,
+            ),
+        )
+
+        restTestClient.post()
+            .uri("/api/v1/stories/simple/storylines")
+            .header("X-Manyak-Device-Id", "test-device")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(
+                """
+                {
+                  "requestId": "${java.util.UUID.randomUUID()}",
+                  "genreTagIds": [${genre.id}, 999999, ${protagonistTag.id}, 999999],
+                  "protagonist": {"featureTagIds": [${protagonistTag.id}, ${supportingTag.id}]},
+                  "supportingCharacters": [
+                    {"featureTagIds": [${supportingTag.id}]},
+                    {"featureTagIds": [${inactive.id}]}
+                  ]
+                }
+                """.trimIndent(),
+            )
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .jsonPath("$.code").isEqualTo("BAD_REQUEST")
+            .jsonPath("$.details.length()").isEqualTo(5)
+            .jsonPath("$.details[0].field").isEqualTo("genreTagIds[1]")
+            .jsonPath("$.details[1].field").isEqualTo("genreTagIds[2]")
+            .jsonPath("$.details[2].field").isEqualTo("genreTagIds[3]")
+            .jsonPath("$.details[3].field").isEqualTo("protagonist.featureTagIds[1]")
+            .jsonPath("$.details[4].field").isEqualTo("supportingCharacters[1].featureTagIds[0]")
+
+        check(sessionRepository.count() == 0L) { "무효 태그 요청은 저장하지 않는다" }
+        check(storyAiClient.lastRequest == null) { "무효 태그 요청은 AI를 부르지 않는다" }
     }
 
     @Test

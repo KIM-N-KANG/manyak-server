@@ -228,12 +228,19 @@ class SimpleStorylineService(
         // AI 호출 진입 직전에 부른다. 호출부가 실패 outcome을 rejected/failure로 가르는 데 쓴다([storylineOutcomeOf]).
         onAiCallStarted: () -> Unit,
     ): GenerateSimpleStorylinesResponse {
-        val genreTags = findSelectedPredefinedTags(request.genreTagIds, SimpleStoryTagCategory.GENRE)
+        val invalidTags = InvalidTagIds()
+        val genreTags = findSelectedPredefinedTags(request.genreTagIds, SimpleStoryTagCategory.GENRE, "genreTagIds", invalidTags)
         val characterDrafts = listOf(
-            request.protagonist.toCharacterDraft(StoryCreationCharacterRole.PROTAGONIST, sortOrder = 1),
+            request.protagonist.toCharacterDraft(StoryCreationCharacterRole.PROTAGONIST, sortOrder = 1, "protagonist", invalidTags),
         ) + request.supportingCharacters.mapIndexed { index, character ->
-            character.toCharacterDraft(StoryCreationCharacterRole.SUPPORTING_CHARACTER, sortOrder = index + 1)
+            character.toCharacterDraft(
+                StoryCreationCharacterRole.SUPPORTING_CHARACTER,
+                sortOrder = index + 1,
+                "supportingCharacters[$index]",
+                invalidTags,
+            )
         }
+        invalidTags.throwIfAny()
         // 장르 직접 입력(KNK-859). 인물 특징과 같은 정규화 키 규칙으로 다루되 분류만 GENRE다.
         val customGenreDrafts = request.customGenreTags
             .map { StoryCreationTagDraft(category = SimpleStoryTagCategory.GENRE, name = it.trim()) }
@@ -475,9 +482,12 @@ class SimpleStorylineService(
         else -> OUTCOME_FAILURE
     }
 
+    /** 무효 ID는 [invalid]에 원본 자리마다 모으고, 찾은 태그만 중복 제거해 선택 순서대로 돌려준다. */
     private fun findSelectedPredefinedTags(
         tagIds: List<Long>,
         expectedCategory: SimpleStoryTagCategory,
+        field: String,
+        invalid: InvalidTagIds,
     ): List<StoryCreationTag> {
         val distinctTagIds = tagIds.distinct()
         if (distinctTagIds.isEmpty()) {
@@ -488,15 +498,32 @@ class SimpleStorylineService(
             .findByIdInAndTagSourceAndIsActiveTrue(distinctTagIds, StoryCreationTagSource.PREDEFINED)
             .filter { it.category == expectedCategory }
             .associateBy { it.id }
-        val missingTagIds = distinctTagIds.filterNot { tagsById.containsKey(it) }
-        if (missingTagIds.isNotEmpty()) {
-            throw ResponseStatusException(
-                HttpStatus.BAD_REQUEST,
-                "사용할 수 없는 태그 ID가 포함되어 있습니다: ${missingTagIds.joinToString(",")}",
-            )
+        tagIds.forEachIndexed { index, tagId ->
+            if (!tagsById.containsKey(tagId)) invalid.add("$field[$index]", tagId)
         }
 
-        return distinctTagIds.map { tagsById.getValue(it) }
+        return distinctTagIds.mapNotNull { tagsById[it] }
+    }
+
+    /** STORY 5-3-1: 서비스가 판정한 무효 태그 ID도 원본 인덱스 경로를 `details`에 싣는다(KNK-2089). */
+    private class InvalidTagIds {
+        private val details = mutableListOf<ApiErrorDetail>()
+        private val ids = linkedSetOf<Long>()
+
+        fun add(field: String, tagId: Long) {
+            details += ApiErrorDetail(field, "사용할 수 없는 태그입니다.")
+            ids += tagId
+        }
+
+        fun throwIfAny() {
+            if (details.isEmpty()) return
+            throw CodedResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "BAD_REQUEST",
+                "사용할 수 없는 태그 ID가 포함되어 있습니다: ${ids.joinToString(",")}",
+                details = details,
+            )
+        }
     }
 
     /** 스토리라인 경로: 저장 전 draft를 인물 단위 AI 입력으로 변환한다. 제공 태그를 먼저 두어 정규화 키가 겹치는 직접 추가 태그는 제공 표기를 남긴다. */
@@ -518,6 +545,8 @@ class SimpleStorylineService(
     private fun SimpleStoryCharacterRequest.toCharacterDraft(
         role: StoryCreationCharacterRole,
         sortOrder: Int,
+        field: String,
+        invalid: InvalidTagIds,
     ): StoryCreationCharacterDraft {
         val category = when (role) {
             StoryCreationCharacterRole.PROTAGONIST -> SimpleStoryTagCategory.PROTAGONIST
@@ -528,7 +557,7 @@ class SimpleStorylineService(
             name = cleanedName(),
             gender = gender,
             sortOrder = sortOrder,
-            predefinedTags = findSelectedPredefinedTags(featureTagIds, category),
+            predefinedTags = findSelectedPredefinedTags(featureTagIds, category, "$field.featureTagIds", invalid),
             customTags = customTags.map { name ->
                 StoryCreationTagDraft(category = category, name = name.trim())
             }.distinctBy { it.key },
