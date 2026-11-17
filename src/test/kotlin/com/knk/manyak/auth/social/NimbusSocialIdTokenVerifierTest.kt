@@ -44,7 +44,7 @@ class NimbusSocialIdTokenVerifierTest {
 
     private fun signToken(
         issuer: String = GOOGLE_ISSUER,
-        audience: String = GOOGLE_CLIENT_ID,
+        audience: String? = GOOGLE_CLIENT_ID,
         subject: String = "google-sub-1",
         email: String? = "alice@example.com",
         name: String? = "Alice",
@@ -98,6 +98,15 @@ class NimbusSocialIdTokenVerifierTest {
     @Test
     fun `aud가 설정 client-id에 없으면 401이다`() {
         assertThatThrownBy { googleVerifier().verify(signToken(audience = "someone-else.apps.googleusercontent.com")) }
+            .isInstanceOf(ResponseStatusException::class.java)
+            .extracting("statusCode")
+            .hasToString("401 UNAUTHORIZED")
+    }
+
+    @Test
+    fun `aud가 없으면 401이다`() {
+        // Spring Security 7.1부터 Jwt.audience가 nullable이다. aud 없는 토큰이 NPE가 아니라 audience 검증 실패로 끝나는지 고정한다(KNK-2094).
+        assertThatThrownBy { googleVerifier().verify(signToken(audience = null)) }
             .isInstanceOf(ResponseStatusException::class.java)
             .extracting("statusCode")
             .hasToString("401 UNAUTHORIZED")
