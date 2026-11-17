@@ -115,11 +115,12 @@ class NimbusSocialIdTokenVerifier(
      */
     private class AudienceValidator(private val clientIds: List<String>) : OAuth2TokenValidator<Jwt> {
         override fun validate(token: Jwt): OAuth2TokenValidatorResult {
-            if (token.audience.none { it in clientIds }) {
+            val audience = token.audience.orEmpty()
+            if (audience.none { it in clientIds }) {
                 return failure("허용되지 않은 audience입니다.")
             }
             val authorizedParty = token.getClaimAsString(CLAIM_AZP)
-            if (token.audience.size > 1 && authorizedParty == null) {
+            if (audience.size > 1 && authorizedParty == null) {
                 return failure("audience가 여러 개면 azp가 필요합니다.")
             }
             if (authorizedParty != null && authorizedParty !in clientIds) {

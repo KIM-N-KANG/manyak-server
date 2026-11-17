@@ -88,7 +88,8 @@ class SecurityFilterChainGuardIntegrationTests : IntegrationTest() {
             "OptionalJwtAuthenticationFilter",
             "BearerTokenAuthenticationFilter",
             "DeletedAccountRejectionFilter",
-            "AuthenticationFilter",
+            // Spring Security 7.0의 리소스 서버가 기본으로 넣던 DPoP용 AuthenticationFilter는 7.1부터 dPoP { }로 켤 때만
+            // 들어간다(KNK-2094). DPoP 토큰을 쓰지 않으므로 켜지 않는다.
             "RequestCacheAwareFilter",
             "SecurityContextHolderAwareRequestFilter",
             "AnonymousAuthenticationFilter",

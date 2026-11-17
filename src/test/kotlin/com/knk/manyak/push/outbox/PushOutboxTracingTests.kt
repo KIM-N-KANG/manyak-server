@@ -60,7 +60,10 @@ class PushOutboxTracingTests {
                         val request = it.getArgument<SendMessageRequest>(0)
                         val context = tracer.currentSpan()!!.context()
                         val traceparent = request.messageAttributes()["traceparent"]?.stringValue()
-                        assertThat(traceparent).isEqualTo("00-${context.traceId()}-${context.spanId()}-01")
+                        // 플래그는 sampled(01)다. OpenTelemetry 1.60부터 SDK가 새로 만든 trace에는 W3C random 비트(02)를 더해
+                        // 03이 되고, 원격 부모를 이은 trace는 부모 플래그(01)를 그대로 쓴다(KNK-2094).
+                        val flags = if (context.traceId() == "4bf92f3577b34da6a3ce929d0e0e4736") "01" else "03"
+                        assertThat(traceparent).isEqualTo("00-${context.traceId()}-${context.spanId()}-$flags")
                         if (context.traceId() == "4bf92f3577b34da6a3ce929d0e0e4736") {
                             assertThat(request.messageAttributes()["tracestate"]?.stringValue()).isEqualTo("vendor=value")
                         }
