@@ -284,7 +284,7 @@ class GeneralStoryCreationIntegrationTests : MockedBoundaryIntegrationTest() {
 
     @Test
     fun `장르가 상한을 넘으면 컬럼 초과 전에 400으로 걸러진다`() {
-        // 9개(상한 8 초과)의 장르는 join 시 stories.genre(VARCHAR(255)) 초과 위험이 있다. insert 전에 400으로 걸러야 한다.
+        // 9개는 계약(STORY 4-2)의 장르 상한 8을 넘는다. 저장 전에 400으로 걸러야 한다.
         val longGenres = (1..9).joinToString(",") { "\"장르_%02d_기이이이인이름\"".format(it) }
         val invalid = body().replace("\"genres\": [\"판타지\", \"미스터리\"]", "\"genres\": [$longGenres]")
 

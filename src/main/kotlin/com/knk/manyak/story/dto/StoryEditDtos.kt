@@ -92,7 +92,7 @@ data class UpdateStoryRequest(
 
     val description: String? = null,
 
-    // 보내면 최소 1개. stories.genre(VARCHAR(255)) 결합 저장이라 개수·길이 상한을 둔다(일반 제작과 동일).
+    // 보내면 1~8개, 각 30자 이하. 계약(STORY 4-2)이 정한 상한이다(일반 제작과 동일).
     @field:Size(min = 1, max = 8, message = "장르는 1개 이상 8개 이하여야 합니다.")
     @field:Schema(description = "활성 제공 장르의 정식 이름 또는 이 스토리에 이미 저장된 장르. 생략/null은 유지")
     val genres: List<@Size(max = 30, message = "각 장르는 30자를 넘을 수 없습니다.") String>? = null,

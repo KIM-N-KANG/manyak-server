@@ -330,6 +330,16 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
     }
 
     @Test
+    fun `서른 자 장르 스무 개로 완성하면 장르 문자열 638자를 자르지 않고 저장한다`() {
+        // 간편 제작 계약의 최대(장르 20개, 이름 30자)다. stories.genre 길이를 고정한다(KNK-2092, STORY 3-2).
+        val genres = (1..20).map { "장" + it.toString().padStart(2, '0') + "가".repeat(27) }
+        postSimpleStory(persistStorylineWithGenres(genres)).expectStatus().isCreated
+        val genre = storyRepository.findAll().single().genre!!
+        assertThat(genre).hasSize(638)
+        assertThat(genre.split(", ")).containsExactlyInAnyOrderElementsOf(genres)
+    }
+
+    @Test
     fun `컴파일 응답의 주요 사건과 엔딩이 저작 테이블에 저장된다`() {
         val storyline = persistStorylineWithGenre("로맨스")
 
@@ -1134,20 +1144,25 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
     private fun storyCreationTimerCount(outcome: String): Long =
         meterRegistry.find("manyak.story.creation.duration").tag("outcome", outcome).timer()?.count() ?: 0L
 
-    private fun persistStorylineWithGenre(genre: String, ownerId: Long? = null): StoryCreationStoryline {
+    private fun persistStorylineWithGenre(genre: String, ownerId: Long? = null): StoryCreationStoryline =
+        persistStorylineWithGenres(listOf(genre), ownerId)
+
+    private fun persistStorylineWithGenres(genres: List<String>, ownerId: Long? = null): StoryCreationStoryline {
         val session = sessionRepository.save(
             StoryCreationSession(userId = ownerId, status = StoryCreationSessionStatus.STORYLINES_GENERATED),
         )
-        val genreTag = tagRepository.save(
-            StoryCreationTag(
-                category = SimpleStoryTagCategory.GENRE,
-                name = genre,
-                tagSource = StoryCreationTagSource.PREDEFINED,
-                sortOrder = 0,
-                isActive = true,
-            ),
-        )
-        sessionTagRepository.save(StoryCreationSessionTag(creationSession = session, tag = genreTag))
+        genres.forEachIndexed { index, genre ->
+            val genreTag = tagRepository.save(
+                StoryCreationTag(
+                    category = SimpleStoryTagCategory.GENRE,
+                    name = genre,
+                    tagSource = StoryCreationTagSource.PREDEFINED,
+                    sortOrder = index,
+                    isActive = true,
+                ),
+            )
+            sessionTagRepository.save(StoryCreationSessionTag(creationSession = session, tag = genreTag))
+        }
         return storylineRepository.save(
             StoryCreationStoryline(
                 creationSession = session,
