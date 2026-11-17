@@ -86,10 +86,20 @@ class AttendanceRewardServiceTest {
     }
 
     @Test
-    fun `회원 행이 없으면 원래 id로 폴백한다`() {
+    fun `회원 행이 없으면 적립 키는 원래 id로 폴백한다`() {
         `when`(userRepository.findRewardIdentityUserId(9L)).thenReturn(null)
-        `when`(creditWalletService.hasTransaction("attendance:9:2026-07-06")).thenReturn(true)
+        `when`(creditWalletService.reward(9L, 10, CreditReason.ATTENDANCE_REWARD, "attendance:9:2026-07-06"))
+            .thenReturn(RewardOutcome(rewarded = true, balance = 10))
 
-        assertThat(service.hasAttendedToday(9L)).isTrue()
+        assertThat(service.claimDailyAttendance(9L).rewarded).isTrue()
+    }
+
+    @Test
+    fun `hasAttendedToday는 받은 보상 신원의 키를 회원 조회 없이 확인한다`() {
+        // KNK-2091: 세션 응답 조립이 회원 행의 보상 신원을 넘긴다. 재가입 계정(id=7, 신원 1)이면 1이 들어온다.
+        `when`(creditWalletService.hasTransaction("attendance:1:2026-07-06")).thenReturn(true)
+
+        assertThat(service.hasAttendedToday(1L)).isTrue()
+        org.mockito.Mockito.verifyNoInteractions(userRepository)
     }
 }
