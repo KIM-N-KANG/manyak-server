@@ -88,7 +88,8 @@ class AdminMetricReadRepository(private val jdbc: NamedParameterJdbcTemplate) {
         FROM story_creation_requests r WHERE r.stage='STORY_COMPLETION' AND r.status IN ('COMPLETED','FAILED') AND r.created_at>=:start AND r.created_at<:end ${exclude("r.user_id", excluded)}
         GROUP BY ${day("r.created_at")} ORDER BY metric_day
         """, params(range, excluded))
-    fun modelCodes(): List<String> = jdbc.queryForList("SELECT code FROM chat_models ORDER BY code", emptyMap<String, Any>(), String::class.java)
+    // code는 NOT NULL이다. Kotlin 2.3부터 Spring의 List<@Nullable T> 표기를 그대로 받아 걸러 준다(KNK-2095).
+    fun modelCodes(): List<String> = jdbc.queryForList("SELECT code FROM chat_models ORDER BY code", emptyMap<String, Any>(), String::class.java).filterNotNull()
 }
 
 @Service
