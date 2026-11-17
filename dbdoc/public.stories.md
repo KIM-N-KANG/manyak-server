@@ -9,7 +9,7 @@
 | title | varchar(100) |  | false |  |  |  |
 | one_line_intro | varchar(255) |  | true |  |  |  |
 | description | text |  | true |  |  |  |
-| genre | varchar(255) |  | true |  |  |  |
+| genre | varchar(700) |  | true |  |  |  |
 | created_at | timestamp with time zone | now() | false |  |  |  |
 | updated_at | timestamp with time zone | now() | false |  |  |  |
 | deleted_at | timestamp with time zone |  | true |  |  |  |
@@ -75,7 +75,7 @@ erDiagram
   varchar_100_ title
   varchar_255_ one_line_intro
   text description
-  varchar_255_ genre
+  varchar_700_ genre
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at

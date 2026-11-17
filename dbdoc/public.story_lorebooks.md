@@ -48,7 +48,7 @@ erDiagram
   varchar_100_ title
   varchar_255_ one_line_intro
   text description
-  varchar_255_ genre
+  varchar_700_ genre
   timestamp_with_time_zone created_at
   timestamp_with_time_zone updated_at
   timestamp_with_time_zone deleted_at
