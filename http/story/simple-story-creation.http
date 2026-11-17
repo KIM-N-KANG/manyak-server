@@ -420,6 +420,39 @@ Accept: application/json
   "protagonist": {}
 }
 
+> {%
+    client.test("무효 태그 ID는 400이고 details에 원본 자리가 있다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.code === "BAD_REQUEST", `code가 다릅니다. actual=${response.body.code}`);
+        const fields = (response.body.details || []).map((d) => d.field);
+        client.assert(JSON.stringify(fields) === JSON.stringify(["genreTagIds[0]"]), `details가 다릅니다. actual=${JSON.stringify(fields)}`);
+    });
+%}
+
+### 5-0. [KNK-2089] 없는 ID와 다른 범주 ID를 여러 자리에 넣으면 자리마다 details
+# 1번을 먼저 실행해 태그 변수가 설정돼 있어야 합니다. 주인공 태그를 장르 자리에, 주변 인물 태그를 주인공 자리에 넣습니다.
+POST {{baseUrl}}/api/v1/stories/simple/storylines
+X-Manyak-Device-Id: {{deviceId}}
+Content-Type: application/json
+Accept: application/json
+
+{
+  "requestId": "{{$uuid}}",
+  "genreTagIds": [{{genreTagId}}, 999999999, {{protagonistTagId}}],
+  "protagonist": {"featureTagIds": [{{protagonistTagId}}, {{supportingCharacterTagId}}]},
+  "supportingCharacters": [{"featureTagIds": [999999999]}]
+}
+
+> {%
+    client.test("무효 태그 자리마다 details에 원본 인덱스 경로가 있다", () => {
+        client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
+        client.assert(response.body.code === "BAD_REQUEST", `code가 다릅니다. actual=${response.body.code}`);
+        const fields = (response.body.details || []).map((d) => d.field);
+        const expected = ["genreTagIds[1]", "genreTagIds[2]", "protagonist.featureTagIds[1]", "supportingCharacters[0].featureTagIds[0]"];
+        client.assert(JSON.stringify(fields) === JSON.stringify(expected), `details가 다릅니다. actual=${JSON.stringify(fields)}`);
+    });
+%}
+
 ### 5-1. 주변 인물 6명이면 400
 POST {{baseUrl}}/api/v1/stories/simple/storylines
 X-Manyak-Device-Id: {{deviceId}}
