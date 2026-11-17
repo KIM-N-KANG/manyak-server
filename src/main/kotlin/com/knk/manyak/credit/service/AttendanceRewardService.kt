@@ -20,8 +20,7 @@ data class AttendanceOutcome(val rewarded: Boolean, val amount: Long, val balanc
  * 키를 user_id가 아니라 **보상 신원**(`coalesce(reward_identity_user_id, id)` — KNK-1053)으로 잡는다:
  * 탈퇴 후 재가입은 user_id를 갈아치우므로, user_id 키면 같은 사람이 하루에도 재가입만으로 출석 보상을 무한 반복 수령한다.
  * 기존 회원·신규 가입은 `reward_identity_user_id`가 NULL이라 키 문자열이 종전과 같아 원장 호환이 유지된다.
- * 시그니처는 그대로 두고 서비스 안에서 해석한다(호출부 [com.knk.manyak.credit.controller.CreditController]·
- * [com.knk.manyak.auth.controller.AuthController]가 각각 id·User만 들고 있어 계약을 흔들지 않는다).
+ * 적립은 회원 id를 받아 서비스 안에서 보상 신원을 해석한다. 조회는 세션 응답 조립이 회원 행을 이미 들고 있어 보상 신원을 받는다(KNK-2091).
  */
 @Service
 class AttendanceRewardService(
@@ -50,15 +49,18 @@ class AttendanceRewardService(
         )
     }
 
-    /** 오늘(KST) 출석 적립을 이미 받았는지 조회한다. 적립과 같은 멱등 키를 확인만 할 뿐 적립을 유발하지 않는다(스펙 §4-3-5 B17). */
+    /**
+     * [rewardIdentityId]의 오늘(KST) 출석 적립을 이미 받았는지 조회한다. 적립과 같은 멱등 키를 확인만 할 뿐 적립을 유발하지 않는다(스펙 §4-3-5 B17).
+     * 인자는 회원 id가 아니라 보상 신원이다.
+     */
     @Transactional(readOnly = true)
-    fun hasAttendedToday(userId: Long): Boolean = creditWalletService.hasTransaction(idempotencyKeyOf(userId))
+    fun hasAttendedToday(rewardIdentityId: Long): Boolean = creditWalletService.hasTransaction(keyOf(rewardIdentityId))
 
-    /** 적립·조회가 반드시 같은 키를 쓰도록 한 곳에서 만든다. 회원이 없으면 원래 id로 폴백한다(호출부가 인증으로 이미 걸러낸다). */
-    private fun idempotencyKeyOf(userId: Long): String {
-        val rewardIdentityId = accounts.rewardIdentityOf(userId)
-        return "attendance:$rewardIdentityId:${LocalDate.now(clock.withZone(SEOUL_ZONE))}"
-    }
+    /** 적립의 키. 회원이 없으면 원래 id로 폴백한다(호출부가 인증으로 이미 걸러낸다). */
+    private fun idempotencyKeyOf(userId: Long): String = keyOf(accounts.rewardIdentityOf(userId))
+
+    /** 적립과 조회가 반드시 같은 키를 쓰도록 한 곳에서 만든다. */
+    private fun keyOf(rewardIdentityId: Long): String = "attendance:$rewardIdentityId:${LocalDate.now(clock.withZone(SEOUL_ZONE))}"
 
     private companion object {
         val SEOUL_ZONE: ZoneId = ZoneId.of("Asia/Seoul")

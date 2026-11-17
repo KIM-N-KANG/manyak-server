@@ -34,5 +34,5 @@ class AccountCreditAdapter(
 
     override fun balanceOf(userId: Long): Long = creditWalletService.balanceOf(userId)
 
-    override fun hasAttendedToday(userId: Long): Boolean = attendanceRewardService.hasAttendedToday(userId)
+    override fun hasAttendedToday(rewardIdentityId: Long): Boolean = attendanceRewardService.hasAttendedToday(rewardIdentityId)
 }
