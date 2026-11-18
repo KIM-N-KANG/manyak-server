@@ -185,7 +185,7 @@ class PushOutboxPostgresTests {
         assertThat(first.map { it.message.messageId }).containsExactly("lease:1", "lease:2")
         assertThat(first.map { it.id }).isSorted()
         assertThat(first.map { it.leaseUntil }).containsOnly(now.plusSeconds(60))
-        assertThat(jdbc.queryForList("SELECT next_attempt_at FROM push_outbox ORDER BY id", java.sql.Timestamp::class.java).map { it!!.toInstant() })
+        assertThat(jdbc.query("SELECT next_attempt_at FROM push_outbox ORDER BY id") { rs, _ -> rs.getTimestamp("next_attempt_at").toInstant() })
             .containsExactly(now.plusSeconds(60), now.plusSeconds(60), now)
         assertThat(store.claim(now, Duration.ofSeconds(60), 2).map { it.message.messageId }).containsExactly("lease:3")
         assertThat(store.claim(now, Duration.ofSeconds(60), 2)).isEmpty()
