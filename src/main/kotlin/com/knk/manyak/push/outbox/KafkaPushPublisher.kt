@@ -2,7 +2,6 @@ package com.knk.manyak.push.outbox
 
 import org.apache.kafka.clients.producer.ProducerRecord
 import org.apache.kafka.common.header.internals.RecordHeaders
-import org.springframework.beans.factory.ObjectProvider
 import org.apache.kafka.clients.producer.ProducerConfig
 import org.apache.kafka.common.serialization.StringSerializer
 import org.springframework.beans.factory.annotation.Value
@@ -20,13 +19,12 @@ import java.util.concurrent.Executors
 class KafkaPushPublisher(
     private val kafka: KafkaTemplate<String, String>,
     private val mapper: ObjectMapper,
-    private val traceHeaders: TraceHeaders = TraceHeaders.NONE,
 ) : PushPublisher, AutoCloseable {
     private val executor = Executors.newVirtualThreadPerTaskExecutor()
-    override fun publish(message: PushMessage): CompletableFuture<Unit> {
-        // 가상 스레드로 넘어가기 전에 릴레이의 현재 스팬에서 헤더를 캡처한다.
+    override fun publish(message: PushMessage, traceHeaders: Map<String, String>): CompletableFuture<Unit> {
+        // 헤더는 릴레이가 자기 스레드에서 정해 넘긴다. 가상 스레드에서는 현재 스팬을 읽지 않는다.
         val headers = RecordHeaders()
-        traceHeaders.inject { name, value -> headers.add(name, value.toByteArray(Charsets.UTF_8)) }
+        traceHeaders.forEach { (name, value) -> headers.add(name, value.toByteArray(Charsets.UTF_8)) }
         return CompletableFuture.supplyAsync({
             kafka.send(ProducerRecord("push.requested", null, null, message.recipientId, mapper.writeValueAsString(message), headers))
         }, executor).thenCompose { it }.thenApply { Unit }
@@ -59,6 +57,5 @@ class KafkaPushConfig {
     @Bean
     fun pushKafkaTemplate(factory: DefaultKafkaProducerFactory<String, String>) = KafkaTemplate(factory)
     @Bean
-    fun pushPublisher(kafka: KafkaTemplate<String, String>, mapper: ObjectMapper, traceHeaders: ObjectProvider<TraceHeaders>) =
-        KafkaPushPublisher(kafka, mapper, traceHeaders.getIfAvailable { TraceHeaders.NONE })
+    fun pushPublisher(kafka: KafkaTemplate<String, String>, mapper: ObjectMapper) = KafkaPushPublisher(kafka, mapper)
 }

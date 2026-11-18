@@ -12,6 +12,8 @@
 | next_attempt_at | timestamp with time zone |  | false |  |  |  |
 | created_at | timestamp with time zone |  | false |  |  |  |
 | published_at | timestamp with time zone |  | true |  |  |  |
+| trace_parent | varchar(55) |  | true |  |  |  |
+| trace_state | varchar(512) |  | true |  |  |  |
 
 ## Constraints
 
@@ -44,6 +46,8 @@ erDiagram
   timestamp_with_time_zone next_attempt_at
   timestamp_with_time_zone created_at
   timestamp_with_time_zone published_at
+  varchar_55_ trace_parent
+  varchar_512_ trace_state
 }
 ```
 
