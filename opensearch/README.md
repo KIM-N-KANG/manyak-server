@@ -206,9 +206,14 @@ MANYAK_TRACING_ENABLED=true MANYAK_OTLP_TRACES_ENDPOINT=http://localhost:4317/v1
 
 ## 스토리 검색 인덱스
 
-[KNK-1141](https://kimandkang.atlassian.net/browse/KNK-1141)의 검색은 로그 도메인에 `stories-dev`·`stories-prod`를 추가합니다. PostgreSQL이 정본이며 검색 문서는 재생성할 수 있는 파생 사본입니다. Flyway·dbdoc 변경은 없습니다.
+[KNK-1141](https://kimandkang.atlassian.net/browse/KNK-1141)의 검색 인덱스 `stories-dev`, `stories-prod`는 [KNK-2101](https://kimandkang.atlassian.net/browse/KNK-2101)부터 홈서버 OpenSearch(관측 데이터와 같은 클러스터, analysis-nori 설치)에 둡니다. PostgreSQL이 정본이며 검색 문서는 재생성할 수 있는 파생 사본입니다. Flyway, dbdoc 변경은 없습니다.
 
-### 환경별 최초 설정
+- 서버는 Cloudflare 터널 주소(https 443)로 붙고, 환경별 검색 전용 계정(Basic)과 Cloudflare Access 서비스 토큰(`CF-Access-Client-Id`, `CF-Access-Client-Secret` 헤더)으로 인증합니다. 계정의 역할은 그 환경의 `stories-{env}*`로 제한합니다. 홈서버 쪽 계정, 역할, 터널 준비는 이 레포 밖에서 합니다.
+- 질의가 실패하거나 3초 안에 응답하지 않거나 인덱스가 없으면, 커서 없는 요청은 DB에서 제목, 한 줄 소개, 장르의 부분 일치로 최신순 한 페이지를 대신 반환합니다(`nextCursor` 없음). 커서 있는 요청은 503입니다. 횟수는 지표 `manyak.story.search.fallback`입니다.
+- 매일 04:30(KST) 전체 재색인이 돌아 색인 실패나 장애로 빠진 문서를 채웁니다(`MANYAK_SEARCH_REINDEX_SCHEDULE_ENABLED`, `..._CRON`).
+- 전환 기간: 엔드포인트가 관리형 도메인 주소(`*.amazonaws.com`)면 서버는 예전처럼 태스크 역할 SigV4로 붙습니다. 아래 "환경별 최초 설정"의 1~4단계와 `setup-search.sh`는 그 관리형 도메인용이며, 도메인을 지운 뒤 이 분기와 함께 삭제합니다.
+
+### 환경별 최초 설정(관리형 도메인, 전환 기간에만 해당)
 
 관리자 셸에서 기존 `setup.sh`와 같은 `OS_URL` basic auth 패턴을 사용합니다. 자격증명이 들어간 URL은 문서·로그에 출력하지 않습니다. `setup-search.sh`는 `curl`·`jq`가 필요합니다.
 
@@ -220,8 +225,10 @@ MANYAK_TRACING_ENABLED=true MANYAK_OTLP_TRACES_ENDPOINT=http://localhost:4317/v1
 
 | 환경변수 | 기본값 | 의미 |
 | --- | --- | --- |
-| `MANYAK_OPENSEARCH_ENDPOINT` | 빈 값 | `https://`·경로 없는 호스트. 빈 값이면 검색 503, 색인 no-op |
-| `AWS_REGION` | `ap-northeast-2` | SigV4 서명 리전 |
+| `MANYAK_OPENSEARCH_ENDPOINT` | 빈 값 | `https://`·경로 없는 호스트(홈서버 터널 주소). 빈 값이면 검색 503, 색인과 정기 재색인 no-op |
+| `MANYAK_OPENSEARCH_USERNAME`, `MANYAK_OPENSEARCH_PASSWORD` | 빈 값 | 환경별 검색 전용 계정(시크릿). 한쪽만 있으면 기동 실패, 둘 다 비면 인증 없이 연결 |
+| `MANYAK_OPENSEARCH_ACCESS_CLIENT_ID`, `MANYAK_OPENSEARCH_ACCESS_CLIENT_SECRET` | 빈 값 | Cloudflare Access 서비스 토큰(시크릿). 한쪽만 있으면 기동 실패, 둘 다 비면 헤더 없이 연결 |
+| `AWS_REGION` | `ap-northeast-2` | 전환 기간의 관리형 도메인 SigV4 서명 리전 |
 | `MANYAK_OPENSEARCH_STORY_INDEX` | `stories-dev` | prod는 반드시 `stories-prod` |
 | `MANYAK_OPENSEARCH_REINDEX_ON_STARTUP` | `false` | `true`로 기동하면 전체 스토리를 500개씩 bulk 재색인 |
 
