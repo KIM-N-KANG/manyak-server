@@ -355,7 +355,7 @@ class SimpleStorylineService(
             ).groupBy { info -> info.storyline.id }
 
             buildStorylinesResponse(creationSession, sessionGenreTags, characters, featureTagsByCharacter, storylines, recommendedInfos)
-            } ?: throw IllegalStateException("Storyline creation transaction result is empty")
+            }
         } catch (exception: Exception) {
             // AI는 성공했으나 태그·세션·스토리라인 저장이 실패하면 실패 이벤트를 남긴다(Codex P2 — 저장 실패가 생성 퍼널에서 누락되지 않도록).
             serverAnalytics.storylineGenerationFailed(
@@ -632,7 +632,7 @@ class SimpleStorylineService(
             tagSource = StoryCreationTagSource.CUSTOM,
         )
         return try {
-            newTagTransactionTemplate.execute { storyCreationTagRepository.saveAndFlush(tag) }!!
+            newTagTransactionTemplate.execute { storyCreationTagRepository.saveAndFlush(tag) }
         } catch (exception: DataIntegrityViolationException) {
             storyCreationTagRepository
                 .findByCategoryAndNormalizedNameIn(draft.category, listOf(tag.normalizedName))

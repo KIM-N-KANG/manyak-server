@@ -40,9 +40,9 @@ class AdminMetricPlatformTests {
         server = MockWebServer().apply { start() }
         fixture = AnalyticsTestFixture(AmplitudeDashboardProperties("mock", "mock", dashboardBaseUrl = server.url("/").toString()), MutableAnalyticsClock(now))
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                requests += r
-                val url = r.requestUrl!!; val e = event(r)
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                val url = request.requestUrl!!; val e = event(request)
                 val from = LocalDate.parse(url.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE)
                 val dates = from.datesUntil(LocalDate.parse(url.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE).plusDays(1)).toList()
                 val value = daily(e["event_type"].asText(), filters(e))
@@ -81,7 +81,7 @@ class AdminMetricPlatformTests {
     }
 
     @Test fun `대역 500이나 자격 증명이 없어도 DB 값으로 200이고 플랫폼만 준비 중이다`(output: CapturedOutput) {
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(500) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500) }
         val missing = AnalyticsTestFixture(AmplitudeDashboardProperties(), MutableAnalyticsClock(now))
         for (result in listOf(signups(), service(missing).signups(com.knk.manyak.admin.dto.AdminChartsRequest()))) {
             assertThat(result.daily).allMatch { it.signups.total == 2L && it.signupsByPlatform == null }
@@ -94,7 +94,7 @@ class AdminMetricPlatformTests {
         // 운영 예산 5초·지연 2초를 같은 비율(2초·800ms)로 줄인다. 저장 개수 경계 여유는 양쪽 400ms다. 기본값 5초는 아래 기본값 테스트가 지킨다(KNK-2058).
         val budget = AdminDashboardProperties(platformTimeout = java.time.Duration.ofSeconds(2))
         val delegate = server.dispatcher
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = delegate.dispatch(r).setHeadersDelay(800, java.util.concurrent.TimeUnit.MILLISECONDS) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = delegate.dispatch(request).setHeadersDelay(800, java.util.concurrent.TimeUnit.MILLISECONDS) }
         fun timed(call: () -> Unit) { val started = System.nanoTime(); call(); assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(java.time.Duration.ofMillis(5800)) }
         val day = com.knk.manyak.admin.dto.AdminChartsRequest().apply { from = "2026-10-23"; to = "2026-10-23" }
         lateinit var signup: SignupResponse
@@ -161,7 +161,7 @@ class AdminMetricPlatformTests {
         val all = service().reach(request("2026-10-23", "2026-10-23"))
         val member = service().reach(request("2026-10-23", "2026-10-23", "member"))
         assertThat(member.segments).isEqualTo(all.segments); assertThat(member.segments.map { it.chats }).containsExactly(2L, 1L, 1L)
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(500) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500) }
         val failed = service().reach(request("2026-10-22", "2026-10-22", "member"))
         assertThat(failed.platforms).isNull(); assertThat(failed.platformAsOf).isNull(); assertThat(failed.pendingDates).containsExactly(LocalDate.parse("2026-10-22"))
         assertThat(failed.segments).isEqualTo(all.segments); assertThat(failed.guestToMember).isEqualTo(all.guestToMember)
@@ -171,9 +171,9 @@ class AdminMetricPlatformTests {
         daily = { _, _ -> 2L }
         val working = server.dispatcher
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse =
-                if (platform(filters(event(r))) == "android") { requests += r; MockResponse().setResponseCode(500) }
-                else working.dispatch(r)
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (platform(filters(event(request))) == "android") { requests += request; MockResponse().setResponseCode(500) }
+                else working.dispatch(request)
         }
         val query = request("2026-10-23", "2026-10-23")
         val partial = service().reach(query)
@@ -220,7 +220,7 @@ class AdminMetricPlatformTests {
     }
 
     @Test fun `채팅 옵션 대역 장애는 DB 값만 주고 플랫폼 값 셋은 null이다`() {
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(500) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500) }
         repository.optionRows = listOf(mapOf("metric_day" to LocalDate.parse("2026-10-23").toEpochDay(), "model" to "LITE", "chats" to 3L, "persona" to 1L))
         val result = service().options(request("2026-10-22", "2026-10-23"))
         assertThat(result.pendingDates).hasSize(2); assertThat(result.platformAsOf).isNull()

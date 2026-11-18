@@ -85,7 +85,7 @@ class StoryTakedownPostgresTests {
                     firstFinished.countDown()
                     check(release.await(10, TimeUnit.SECONDS))
                     result
-                }!!
+                }
             }
             if (!firstFinished.await(10, TimeUnit.SECONDS)) first.get(1, TimeUnit.SECONDS)
             val second = pool.submit<Any> {
@@ -93,7 +93,7 @@ class StoryTakedownPostgresTests {
                 TransactionTemplate(manager).execute {
                     jdbc.execute("SET LOCAL lock_timeout = '5s'")
                     if (takedownFirst) publish() else take()
-                }!!
+                }
             }
             check(secondStarted.await(5, TimeUnit.SECONDS))
             assertThatThrownBy { second.get(200, TimeUnit.MILLISECONDS) }.isInstanceOf(TimeoutException::class.java)

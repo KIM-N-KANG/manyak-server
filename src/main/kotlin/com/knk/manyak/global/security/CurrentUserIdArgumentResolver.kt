@@ -33,7 +33,7 @@ class CurrentUserIdArgumentResolver(
 
     override fun supportsParameter(parameter: MethodParameter): Boolean =
         parameter.hasParameterAnnotation(CurrentUserId::class.java) &&
-            parameter.parameterType == java.lang.Long::class.java
+            parameter.parameterType == Long::class.javaObjectType
 
     override fun resolveArgument(
         parameter: MethodParameter,

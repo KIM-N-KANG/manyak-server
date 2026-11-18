@@ -41,7 +41,7 @@ class AdminModerationMetricsRepository(private val jdbc: NamedParameterJdbcTempl
         SELECT COALESCE(SUM(CASE WHEN held_at IS NOT NULL THEN 1 ELSE 0 END),0) AS held,
             COALESCE(SUM(CASE WHEN held_at IS NULL THEN 1 ELSE 0 END),0) AS pending
         FROM story_submissions WHERE status='PENDING'
-        """, emptyMap<String, Any>()) { rs, _ -> AdminModerationBacklog(rs.getLong("held"), rs.getLong("pending")) }!!
+        """, emptyMap<String, Any>()) { rs, _ -> AdminModerationBacklog(rs.getLong("held"), rs.getLong("pending")) }
 
     fun rejectionRules(from: Instant, until: Instant): List<AdminModerationRejectionRule> {
         val counts = mutableMapOf<Pair<String, String>, Long>()

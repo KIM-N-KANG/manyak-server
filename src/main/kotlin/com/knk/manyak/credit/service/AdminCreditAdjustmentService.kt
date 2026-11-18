@@ -64,13 +64,13 @@ class AdminCreditAdjustmentService(
                     request.memberId.toString(), request.reason,
                     mapper.createObjectNode().put("balance", outcome.beforeBalance), after)
                 response(row, request, false)
-            }!!
+            }
         } catch (conflict: AdjustmentInsertConflict) {
             // 실패한 트랜잭션은 완전히 롤백됐다. 이 조회에는 경쟁에서 이긴 요청의 커밋 결과만 보인다.
             return transaction.execute {
                 val stored = adjustments.findByIdempotencyKey(request.idempotencyKey) ?: throw conflict.cause!!
                 replay(stored, request)
-            }!!
+            }
         }
     }
 

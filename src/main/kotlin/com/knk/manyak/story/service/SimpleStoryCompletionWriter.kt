@@ -248,7 +248,7 @@ class SimpleStoryCompletionWriter(
                 ).rendered(story.protagonistName),
                 aiCallLogId = recorded.aiCallLogId,
             )
-        } ?: throw IllegalStateException("Story creation transaction result is empty")
+        }
     }
 
     /**

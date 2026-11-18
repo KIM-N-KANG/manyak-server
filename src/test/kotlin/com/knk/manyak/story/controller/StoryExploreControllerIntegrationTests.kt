@@ -91,7 +91,7 @@ class StoryExploreControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         val card = anonymous.single { it.id == member.publicId.toString() }
         assertTrue(card.isOriginal)
         assertEquals("공식 작가", card.author!!.nickname)
-        assertNull(card.author!!.id)
+        assertNull(card.author.id)
         assertEquals(3L, card.turnCount)
         assertEquals(1L, card.likeCount)
         assertEquals(listOf("판타지"), card.genres)

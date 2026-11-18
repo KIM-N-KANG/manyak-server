@@ -24,8 +24,8 @@ class AdminAnalyticsTests {
     private fun request(from: LocalDate, to: LocalDate) = AdminChartsRequest().apply { this.from = from.toString(); this.to = to.toString() }
     private fun dispatcher() {
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                val url = r.requestUrl!!; val from = LocalDate.parse(url.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val url = request.requestUrl!!; val from = LocalDate.parse(url.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val to = LocalDate.parse(url.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val dates = from.datesUntil(to.plusDays(1)).toList().map { it.toString() }
                 return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates, "series" to listOf(List(dates.size) { if (mapper.readTree(url.queryParameter("e")!!)["event_type"].asText() == "_active") 10 else 5 })))))
@@ -34,8 +34,8 @@ class AdminAnalyticsTests {
     }
     @Test fun `개요 분석은 전체 웹 앱 여섯 조회 값을 반환한다`() {
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                val e = r.requestUrl!!.queryParameter("e")?.let { mapper.readTree(it) }
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val e = request.requestUrl!!.queryParameter("e")?.let { mapper.readTree(it) }
                 val p = e?.get("filters")?.toList()?.first { it["subprop_key"].asText()=="platform" }?.get("subprop_value")
                 val value = when { p==null -> 0; p.size()==2 -> 13; p[0].asText()=="Web" -> 10; else -> 5 }
                 return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to listOf(today.toString()), "series" to listOf(listOf(value))))))
@@ -111,17 +111,17 @@ class AdminAnalyticsTests {
     @Test fun `자정 뒤 실패해도 지난 날짜 응답은 유지하고 전날 오늘 값은 null이다`() {
         dispatcher(); val request = request(today, today); fixture.service.dashboard(request)
         fixture.clock.at = Instant.parse("2026-10-22T15:01:00Z")
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(500) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500) }
         val result = fixture.service.dashboard(request)
         assertThat(result.todayActiveUsers).isNull(); assertThat(result.daily).hasSize(1)
     }
     @Test fun `조회 중 자정을 지나면 전날 활성 세 값을 오늘 값으로 반환하지 않는다`() {
         fixture.clock.at = Instant.parse("2026-10-22T14:59:59Z")
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
+            override fun dispatch(request: RecordedRequest): MockResponse {
                 fixture.clock.at = Instant.parse("2026-10-22T15:00:01Z")
-                val from = LocalDate.parse(r.requestUrl!!.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
-                val to = LocalDate.parse(r.requestUrl!!.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+                val from = LocalDate.parse(request.requestUrl!!.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+                val to = LocalDate.parse(request.requestUrl!!.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val dates = from.datesUntil(to.plusDays(1)).toList()
                 return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates.map { it.toString() }, "series" to listOf(List(dates.size) { 8 })))))
             }
@@ -157,7 +157,7 @@ class AdminAnalyticsTests {
     @Test fun `단일 갱신 중 다른 요청은 기다리지 않고 저장 값으로 응답한다`() {
         dispatcher(); val previous = fixture.service.dashboard(7); fixture.clock.at = now.plusSeconds(600); val calls = server.requestCount
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse {
             entered.countDown(); release.await(3, TimeUnit.SECONDS)
             return MockResponse().setBody("{\"data\":{\"xValues\":[\"2026-10-22\"],\"series\":[[20]]}}")
         } }
@@ -175,7 +175,7 @@ class AdminAnalyticsTests {
         val events = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
         dispatcher(); val previous = fixture.service.dashboard(7); val calls = server.requestCount
         fixture.clock.at = now.plusSeconds(600)
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(500) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500) }
         logger.addAppender(events)
         try {
             val stale = fixture.service.dashboard(7)

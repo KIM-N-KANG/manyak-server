@@ -81,7 +81,7 @@ class NoticeNotificationConnectionIntegrationTests : IntegrationTest() {
                             notices.lockByPublicId(notice.publicId)!!.status = NoticeStatus.DRAFT
                             true
                         } else service.connectNotification(notice.publicId) != null
-                    }!!
+                    }
                 }
                 check(waiting.await(5, TimeUnit.SECONDS))
                 assertThatThrownBy { second.get(200, TimeUnit.MILLISECONDS) }.isInstanceOf(TimeoutException::class.java)

@@ -41,7 +41,7 @@ class ChatTurnHistoryLoadIntegrationTests : ScriptedAiIntegrationTest() {
         .getMethod("findByChatIdOrderByMessageOrderAsc", Long::class.java)
         .getAnnotation(Query::class.java).value
 
-    private fun historyLoads() =
+    private fun historyLoads(): Long =
         entityManagerFactory.unwrap(SessionFactory::class.java).statistics.getQueryStatistics(historyQuery).executionCount
 
     @BeforeEach fun setUp() = cleaner.cleanAll()

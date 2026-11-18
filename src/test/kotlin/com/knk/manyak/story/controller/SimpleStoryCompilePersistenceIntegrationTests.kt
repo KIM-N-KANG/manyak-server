@@ -777,8 +777,9 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
     private fun memberTrialUsed(userId: Long) =
         trials.usage(userId, null, com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORY_CREATION).used
 
-    private fun requestStatuses(): List<String?> =
-        jdbc.queryForList("SELECT status FROM story_creation_requests WHERE stage = 'STORY_COMPLETION'", String::class.java)
+    // status는 NOT NULL이다. 행 매퍼로 읽어 List<@Nullable String> 추론을 피한다.
+    private fun requestStatuses(): List<String> =
+        jdbc.query("SELECT status FROM story_creation_requests WHERE stage = 'STORY_COMPLETION'") { rs, _ -> rs.getString("status") }
 
     private val duplicateEndings = listOf(
         AiStoryEnding("같은엔딩", 5, "조건 A", "에필로그 A"),

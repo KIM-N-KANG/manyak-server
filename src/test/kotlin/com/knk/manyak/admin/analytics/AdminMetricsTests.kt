@@ -26,10 +26,10 @@ class AdminMetricsTests {
         fixture = AnalyticsTestFixture(AmplitudeDashboardProperties("mock", "mock", dashboardBaseUrl = server.url("/").toString()), MutableAnalyticsClock(Instant.parse("2026-10-23T03:00:00Z")))
         service = AdminMetricsService(MetricDefinitions(AnalyticsQueryFactory(mapper), mapper), fixture.snapshots, AnalyticsQueryFactory(mapper), modelCodeReads(), com.knk.manyak.admin.config.AdminDashboardProperties(), fixture.clock)
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                requests += r
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
                 if (broken) return MockResponse().setResponseCode(500)
-                val url = r.requestUrl!!; val from = LocalDate.parse(url.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE); val to = LocalDate.parse(url.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
+                val url = request.requestUrl!!; val from = LocalDate.parse(url.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE); val to = LocalDate.parse(url.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
                 val range = AnalyticsRange(from, to); val path = url.encodedPath
                 val data: Any = when {
                     path.endsWith("/retention") -> mapOf("series" to listOf(mapOf("values" to range.dates().associate { date -> date.format(DateTimeFormatter.ofPattern("MMM d, uuuu", java.util.Locale.ENGLISH)) to (retentionBySe?.invoke(url.queryParameter("se")!!, date) ?: retentionValues?.get(date) ?: List(32) { i -> mapOf("count" to if (i==0) 20 else if (date.dayOfMonth==19) 5 else 10, "outof" to 20, "incomplete" to (i==8)) }) })))

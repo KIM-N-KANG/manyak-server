@@ -50,11 +50,11 @@ private const val AD_OPT_OUT_NOTICE = "수신거부: 마이 > 알림 설정"
 class PushMessageTemplateService(
     private val pushMessageTemplateRepository: PushMessageTemplateRepository,
     // yml 기본 문구. 오버라이드가 없을 때 쓰며, 정본은 application.yml이다.
-    @param:Value("\${manyak.push.templates.attendance-reminder.title}") attendanceReminderTitle: String,
-    @param:Value("\${manyak.push.templates.attendance-reminder.body}") attendanceReminderBody: String,
+    @Value("\${manyak.push.templates.attendance-reminder.title}") attendanceReminderTitle: String,
+    @Value("\${manyak.push.templates.attendance-reminder.body}") attendanceReminderBody: String,
     private val clock: Clock = Clock.systemUTC(),
-    @param:Value("\${manyak.push.templates.credit-expiry-reminder.title}") creditExpiryReminderTitle: String,
-    @param:Value("\${manyak.push.templates.credit-expiry-reminder.body}") creditExpiryReminderBody: String,
+    @Value("\${manyak.push.templates.credit-expiry-reminder.title}") creditExpiryReminderTitle: String,
+    @Value("\${manyak.push.templates.credit-expiry-reminder.body}") creditExpiryReminderBody: String,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
