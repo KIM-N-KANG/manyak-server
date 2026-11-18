@@ -232,12 +232,14 @@ GET {{baseUrl}}/api/v1/stories/search?q=검색%25검증
 %}
 
 ### 13. 저장소 장애 중 커서 있는 요청은 503(11번과 같은 장애 환경, 4번에서 받은 nextCursor 사용)
+# 서버 로그: WARN "스토리 검색 실패" 한 줄만 남고, GlobalExceptionHandler ERROR와 스택, Sentry 이벤트는 없어야 한다(KNK-2105).
 GET {{baseUrl}}/api/v1/stories/search?q=왕국&cursor={{storySearchCursor}}
 
 > {%
   client.test("커서 요청은 대체하지 않고 503", () => {
     client.assert(response.status === 503, `actual=${response.status}`);
     client.assert(response.body.code === "SERVICE_UNAVAILABLE", `actual=${response.body.code}`);
+    client.assert(response.body.message === "검색을 일시적으로 사용할 수 없습니다.", `actual=${response.body.message}`);
   });
 %}
 

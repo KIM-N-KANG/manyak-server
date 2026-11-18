@@ -365,6 +365,36 @@ class StorySearchControllerIntegrationTests : MockedBoundaryIntegrationTest() {
     }
 
     @Test
+    fun `저장소 장애 중 커서 요청의 503은 Sentry에 보내지 않고 ERROR 없이 DEBUG 한 줄만 남긴다`() {
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java))).thenThrow(java.io.IOException("unavailable"))
+        val cursor = StorySearchCursor.fromSort(listOf(FieldValue.of(1.0), FieldValue.of(1L), FieldValue.of(UUID.randomUUID().toString()))).encode("왕국")
+        val captured = java.util.concurrent.CopyOnWriteArrayList<io.sentry.SentryEvent>()
+        io.sentry.Sentry.init { options ->
+            options.dsn = "http://test@localhost/1"
+            options.beforeSend = io.sentry.SentryOptions.BeforeSendCallback { event, _ -> captured.add(event); null }
+        }
+        val logger = org.slf4j.LoggerFactory.getLogger(com.knk.manyak.global.error.GlobalExceptionHandler::class.java) as ch.qos.logback.classic.Logger
+        val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
+        val level = logger.level
+        logger.level = ch.qos.logback.classic.Level.DEBUG
+        logger.addAppender(appender)
+        try {
+            // 응답 상태, code, 문구는 그대로다(STORY 4-2-3).
+            client.get().uri("/api/v1/stories/search?q=왕국&cursor=$cursor").exchange().expectStatus().isEqualTo(503)
+                .expectBody().jsonPath("$.code").isEqualTo("SERVICE_UNAVAILABLE")
+                .jsonPath("$.message").isEqualTo("검색을 일시적으로 사용할 수 없습니다.")
+        } finally {
+            logger.detachAppender(appender)
+            logger.level = level
+            io.sentry.Sentry.close()
+        }
+        assertTrue(captured.isEmpty(), "Sentry 이벤트: ${captured.map { it.getTag("endpoint") }}")
+        val line = appender.list.single()
+        assertEquals(ch.qos.logback.classic.Level.DEBUG, line.level)
+        assertNull(line.throwableProxy)
+    }
+
+    @Test
     fun `일반 제작 수정 공개 전환 좋아요 취소 삭제 닉네임은 커밋 후 색인한다`() {
         val user = users.save(User(nickname = "검색작가", status = UserStatus.ACTIVE))
         val created = general.createGeneralStory(
