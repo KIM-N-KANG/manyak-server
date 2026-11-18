@@ -7,6 +7,14 @@ import com.knk.manyak.story.dto.StoryPageResponse
 import com.knk.manyak.story.service.StoryAuthorResolver
 import com.knk.manyak.story.service.OfficialStoryAccount
 import com.knk.manyak.story.service.StoryPlayReader
+import com.knk.manyak.story.service.StoryService
+import io.micrometer.core.instrument.Counter
+import io.micrometer.core.instrument.MeterRegistry
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import java.util.UUID
 import org.opensearch.client.opensearch.OpenSearchClient
 import org.opensearch.client.opensearch._types.OpenSearchException
@@ -26,8 +34,13 @@ class StorySearchService(
     private val indexer: StorySearchIndexer,
     private val officialStoryAccount: OfficialStoryAccount,
     private val authorResolver: StoryAuthorResolver,
+    private val fallbackStories: StoryService,
+    meters: MeterRegistry = SimpleMeterRegistry(),
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
+    // 검색 저장소 장애로 DB 대체 검색을 한 횟수. 기동 시 0으로 등록한다(STORY 5-4).
+    private val fallbacks = Counter.builder("manyak.story.search.fallback").register(meters)
+    private val queryExecutor = Executors.newVirtualThreadPerTaskExecutor()
 
     fun search(q: String, limit: Int, cursor: String?): StoryPageResponse {
         val query = q.trim()
@@ -49,15 +62,20 @@ class StorySearchService(
             .sort { it.field { f -> f.field("createdAt").order(SortOrder.Desc) } }
             .sort { it.field { f -> f.field("publicId").order(SortOrder.Asc) } }
         after?.let { request.searchAfter(it.sortValues()) }
+        val built = request.build()
+        // 응답 한도는 연결을 포함한 전체 시간이다. HTTP 클라이언트의 연결과 응답 제한은 합쳐지므로 호출 전체에 건다.
+        val call = CompletableFuture.supplyAsync({ searchClient.search(built, StorySearchDocument::class.java) }, queryExecutor)
         val response = try {
-            searchClient.search(request.build(), StorySearchDocument::class.java)
+            call.get(properties.queryTimeout.toMillis(), TimeUnit.MILLISECONDS)
         } catch (ex: Exception) {
-            if (ex is OpenSearchException && ex.error().type() == "index_not_found_exception") {
-                return StoryPageResponse(items = emptyList(), nextCursor = null)
-            }
-            // 질의 원문이나 자격증명이 포함될 수 있는 외부 오류 본문은 기록하지 않는다.
-            log.warn("스토리 검색 실패 (error={})", ex.javaClass.simpleName)
-            throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "검색을 일시적으로 사용할 수 없습니다.")
+            call.cancel(true)
+            if (ex is InterruptedException) Thread.currentThread().interrupt()
+            val cause = (ex as? ExecutionException)?.cause ?: ex
+            // 질의 원문이나 자격증명이 포함될 수 있는 외부 오류 본문은 기록하지 않는다. 없는 인덱스도 같은 실패로 본다(결정 28).
+            log.warn("스토리 검색 실패 (error={})", cause.javaClass.simpleName)
+            if (after != null) throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "검색을 일시적으로 사용할 수 없습니다.")
+            fallbacks.increment()
+            return StoryPageResponse(items = fallbackStories.searchListedByText(query, pageSize), nextCursor = null)
         }
         val hits = response.hits().hits()
         val page = hits.take(pageSize)

@@ -461,6 +461,25 @@ class StoryService(
         }
     }
 
+    /**
+     * 검색 저장소 장애 때의 DB 대체 검색(STORY 4-1-3). 제목, 한 줄 소개, 장르 문자열 가운데 하나가 [query] 전체를 포함하는
+     * 목록 노출 스토리를 최신순으로 [limit]건까지 카드로 돌려준다. 비교는 대소문자를 무시하고 `%`, `_`를 문자 그대로 본다.
+     * 제목과 한 줄 소개는 이름 토큰을 치환하기 전 원문과 비교한다. 노출 조건은 공개 목록, 검색과 같은 [Story.isPubliclyListed]다.
+     * ponytail: 후보를 전부 훑는 부분 일치라 스토리가 수만 건을 넘으면 인덱스나 다른 방식이 필요하다(결정 28).
+     */
+    @Transactional(readOnly = true)
+    fun searchListedByText(query: String, limit: Int): List<StorySummaryResponse> {
+        val pattern = "%" + query.lowercase().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        val listed = mutableListOf<Story>()
+        var page = 0
+        while (listed.size < limit) {
+            val rows = storyRepository.findTextMatches(pattern, PageRequest.of(page++, TEXT_SEARCH_SCAN_SIZE))
+            rows.filterTo(listed) { it.isPubliclyListed() }
+            if (rows.size < TEXT_SEARCH_SCAN_SIZE) break
+        }
+        return listed.take(limit).toSummaryResponses(officialStoryAccount.officialUserId())
+    }
+
     @Transactional(readOnly = true)
     fun assembleSummaryCards(stories: List<Story>): List<StorySummaryResponse> =
         stories.toSummaryResponses(officialStoryAccount.officialUserId())
@@ -510,3 +529,6 @@ class StoryService(
             createdAt = createdAt,
         ).rendered(protagonistName)
 }
+
+/** 대체 검색이 후보를 한 번에 읽는 건수. */
+private const val TEXT_SEARCH_SCAN_SIZE = 100
