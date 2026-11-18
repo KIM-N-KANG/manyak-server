@@ -99,14 +99,14 @@ class AnalyticsBatchTests {
         // enqueue 대신 응답을 순서대로 주는 dispatcher
         var calls = 0
         val success = server.dispatcher
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse =
-            if (++calls == 1) MockResponse().setResponseCode(500) else success.dispatch(r) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse =
+            if (++calls == 1) MockResponse().setResponseCode(500) else success.dispatch(request) }
         val first = runner.run()!!
         assertThat(first.result).isEqualTo("partial"); assertThat(first.reason).isEqualTo("http_error"); assertThat(first.cost).isEqualTo(1)
         assertThat(server.requestCount).isEqualTo(2)
         runner.run(); assertThat(server.requestCount).isEqualTo(2) // 키 쿨다운
         clock.at = clock.at.plusSeconds(60)
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(429) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(429) }
         val limited = runner.run()!!
         assertThat(limited.reason).isEqualTo("rate_limited"); assertThat(server.requestCount).isEqualTo(3)
         assertThat(fixture.budget.reserve(499)).isTrue()
@@ -194,19 +194,19 @@ class AnalyticsBatchTests {
         val catalog = DefaultAnalyticsBatchCatalog(dashboard, defs, CampaignAnalyticsService(settings, fixture.snapshots, queries, clock), settings, policy, modelCodeReads(), PushOpensService(org.mockito.Mockito.mock(com.knk.manyak.push.service.PushDeliveryService::class.java), fixture.snapshots, queries, PushOpensSettings(day.minusDays(5), day.minusDays(3)), clock, org.mockito.Mockito.mock(com.knk.manyak.admin.repository.PushChatConversionRepository::class.java)))
         val runner = AnalyticsBatchRunner(catalog, fixture.snapshots, policy, clock)
         val original = server.dispatcher
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
-            if (r.requestUrl!!.encodedPath == "/api/2/sessions/length") return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("series" to listOf(List(9) { 1 }),
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse {
+            if (request.requestUrl!!.encodedPath == "/api/2/sessions/length") return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("series" to listOf(List(9) { 1 }),
                 "xValues" to defs.sessionLengthBounds.zipWithNext { a, b -> "${a}s-${b}s" }))))
-            if (r.requestUrl!!.encodedPath == "/api/2/funnels") return MockResponse().setBody("""{"data":[{"cumulativeRaw":[20,6]}]}""")
-            if (r.requestUrl!!.queryParameter("g") != null || r.requestUrl!!.queryParameter("e")?.contains("utm_campaign") == true) {
-                val start = LocalDate.parse(r.requestUrl!!.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE)
-                val end = LocalDate.parse(r.requestUrl!!.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
+            if (request.requestUrl!!.encodedPath == "/api/2/funnels") return MockResponse().setBody("""{"data":[{"cumulativeRaw":[20,6]}]}""")
+            if (request.requestUrl!!.queryParameter("g") != null || request.requestUrl!!.queryParameter("e")?.contains("utm_campaign") == true) {
+                val start = LocalDate.parse(request.requestUrl!!.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE)
+                val end = LocalDate.parse(request.requestUrl!!.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
                 val dates = AnalyticsRange(start, end).dates()
                 return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates.map { it.toString() }, "seriesLabels" to listOf(listOf(0, "source")), "series" to listOf(dates.map { 1 })))))
             }
-            if (r.requestUrl!!.encodedPath != "/api/2/retention") return original.dispatch(r)
-            val from = LocalDate.parse(r.requestUrl!!.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE)
-            val to = LocalDate.parse(r.requestUrl!!.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
+            if (request.requestUrl!!.encodedPath != "/api/2/retention") return original.dispatch(request)
+            val from = LocalDate.parse(request.requestUrl!!.queryParameter("start"), DateTimeFormatter.BASIC_ISO_DATE)
+            val to = LocalDate.parse(request.requestUrl!!.queryParameter("end"), DateTimeFormatter.BASIC_ISO_DATE)
             val points = List(32) { i -> mapOf("count" to if (i == 0) 2 else 1, "outof" to 2, "incomplete" to (i == 31)) }
             return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("series" to listOf(mapOf("values" to AnalyticsRange(from, to).dates().associate { it.toString() to points }))))))
         } }

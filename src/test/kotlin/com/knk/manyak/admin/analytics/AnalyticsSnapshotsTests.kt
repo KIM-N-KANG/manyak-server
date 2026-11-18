@@ -19,9 +19,9 @@ class AnalyticsSnapshotsTests {
         val def = AnalyticsDefinition("stored_test", "/api/2/users", listOf("m" to "active", "i" to "1"), 1, fixture.mapper)
         metric = DailyAnalyticsMetric(def) { data, range -> range.dates().zip(AmplitudeResults.series(data, range).map { fixture.mapper.valueToTree<JsonNode>(it) }).toMap() }
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                val from = LocalDate.parse(r.requestUrl!!.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
-                val to = LocalDate.parse(r.requestUrl!!.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val from = LocalDate.parse(request.requestUrl!!.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+                val to = LocalDate.parse(request.requestUrl!!.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val dates = from.datesUntil(to.plusDays(1)).toList()
                 return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates.map { it.toString() }, "series" to listOf(List(dates.size) { 7 })))))
             }
@@ -171,7 +171,7 @@ class AnalyticsSnapshotsTests {
         val events = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
         logger.addAppender(events)
         try {
-            server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setBody("""{"data":{"private":"secret response"}}""") }
+            server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setBody("""{"data":{"private":"secret response"}}""") }
             val range = AnalyticsRange(day,day)
             val result = load("/test",range,listOf(metric))
             assertThat(result.readyDates()).isEmpty()
@@ -200,7 +200,7 @@ class AnalyticsSnapshotsTests {
             load("/test", range, listOf(metric))
             assertThat(events.list.last().formattedMessage).contains("reused_days=0")
             fixture.clock.at = now.plusSeconds(1200)
-            server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(500).setBody("sensitive mock response") }
+            server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500).setBody("sensitive mock response") }
             load("/test", range, listOf(metric))
             val failure = events.list.last { it.formattedMessage.startsWith("admin_analytics_fetch_failed") }
             assertThat(failure.formattedMessage).contains("reason=http_error", "status=500", "endpoint=/test").doesNotContain("mock", "sensitive")

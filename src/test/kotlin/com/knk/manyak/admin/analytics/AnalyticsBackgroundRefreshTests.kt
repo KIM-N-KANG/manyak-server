@@ -35,9 +35,9 @@ class AnalyticsBackgroundRefreshTests {
         service = CampaignAnalyticsService(settings, fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), fixture.clock)
         metrics = service.trendMetrics("campaign")
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
+            override fun dispatch(request: RecordedRequest): MockResponse {
                 gate?.await(30, TimeUnit.SECONDS)
-                val url = r.requestUrl!!
+                val url = request.requestUrl!!
                 val from = LocalDate.parse(url.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val to = LocalDate.parse(url.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val dates = from.datesUntil(to.plusDays(1)).toList()

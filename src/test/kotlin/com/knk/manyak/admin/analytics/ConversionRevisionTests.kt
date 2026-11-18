@@ -16,9 +16,9 @@ class ConversionRevisionTests {
         val queries = AnalyticsQueryFactory(fixture.mapper)
         service = AdminMetricsService(MetricDefinitions(queries, fixture.mapper), fixture.snapshots, queries, modelCodeReads(), com.knk.manyak.admin.config.AdminDashboardProperties(), fixture.clock)
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                requests += r
-                return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to listOf(mapOf("cumulativeRaw" to List(r.requestUrl!!.queryParameterValues("e").size) { 10 - it } )))))
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to listOf(mapOf("cumulativeRaw" to List(request.requestUrl!!.queryParameterValues("e").size) { 10 - it } )))))
             }
         }
     }

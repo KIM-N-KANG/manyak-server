@@ -23,9 +23,9 @@ class GrowthEndpointsTests {
         campaigns = CampaignAnalyticsService(settings, fixture.snapshots, q, fixture.clock)
         users = AdminMetricsService(definitions, fixture.snapshots, q, modelCodeReads(), AdminDashboardProperties(), fixture.clock)
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                requests += r
-                val u = r.requestUrl!!
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                val u = request.requestUrl!!
                 val dates = AnalyticsRange(LocalDate.parse(u.queryParameter("start"), BASIC_ISO_DATE), LocalDate.parse(u.queryParameter("end"), BASIC_ISO_DATE)).dates()
                 val events = u.queryParameterValues("e").map { fixture.mapper.readTree(it!!) }
                 val fs = events[0]["filters"].toString()
@@ -123,8 +123,8 @@ class GrowthEndpointsTests {
     }
     @Test fun `빈 정상 그룹과 퍼널은 0 값과 null 비율로 준비 완료다`() {
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                val u = r.requestUrl!!
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val u = request.requestUrl!!
                 val dates = AnalyticsRange(LocalDate.parse(u.queryParameter("start"), BASIC_ISO_DATE), LocalDate.parse(u.queryParameter("end"), BASIC_ISO_DATE)).dates()
                 val data: Any = when {
                     u.encodedPath.endsWith("/funnels") -> emptyList<Any>()
@@ -143,7 +143,7 @@ class GrowthEndpointsTests {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(strings = ["[20]", "[20,21]", "[-1,0]"])
     fun `앱 활성 퍼널 형식 오류는 저장하지 않고 사용 불가다`(values: String) {
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setBody("""{"data":[{"cumulativeRaw":$values}]}""") }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setBody("""{"data":[{"cumulativeRaw":$values}]}""") }
         assertThatThrownBy { users.appActivation(query()) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
         assertThat(fixture.store.daily(definitions.appActivation().definition, day, day)).isEmpty()
     }
