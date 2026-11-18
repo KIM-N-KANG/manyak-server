@@ -68,13 +68,13 @@ enum class CreditPolicyKey(val storageKey: String, val minimumAmount: Long) {
 class CreditPolicyService(
     private val creditPolicyRepository: CreditPolicyRepository,
     // yml 기본값(스펙 §4-3-7, 2026-08-31 재확정). 오버라이드가 없을 때 쓰는 폴백이며, 정본은 application.yml이다.
-    @param:Value("\${manyak.credit.signup-reward}") signupReward: Long,
-    @param:Value("\${manyak.credit.invite-reward}") inviteReward: Long,
-    @param:Value("\${manyak.credit.invite-monthly-cap}") inviteMonthlyCap: Long,
-    @param:Value("\${manyak.credit.attendance-reward}") attendanceReward: Long,
-    @param:Value("\${manyak.credit.story-creation-cost}") storyCreationCost: Long,
+    @Value("\${manyak.credit.signup-reward}") signupReward: Long,
+    @Value("\${manyak.credit.invite-reward}") inviteReward: Long,
+    @Value("\${manyak.credit.invite-monthly-cap}") inviteMonthlyCap: Long,
+    @Value("\${manyak.credit.attendance-reward}") attendanceReward: Long,
+    @Value("\${manyak.credit.story-creation-cost}") storyCreationCost: Long,
     private val clock: Clock = Clock.systemUTC(),
-    @param:Value("\${manyak.credit.chat-image-cost}") chatImageCost: Long = 0,
+    @Value("\${manyak.credit.chat-image-cost}") chatImageCost: Long = 0,
 ) {
     private val logger = LoggerFactory.getLogger(javaClass)
 
