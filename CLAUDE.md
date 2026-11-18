@@ -44,7 +44,7 @@
 
 ### Kotlin Spring 작업
 
-- 이 백엔드는 Kotlin, Spring Boot, Gradle Kotlin DSL, Java 21, JPA, Flyway, Security, PostgreSQL을 사용합니다.
+- 이 백엔드는 Kotlin, Spring Boot, Gradle Kotlin DSL, Java 25, JPA, Flyway, Security, PostgreSQL을 사용합니다.
 - 편집 전에 기존 패키지 구조와 빌드 설정을 읽습니다. 코틀린 탐색·리팩터링은 grep보다 **LSP 도구(goToDefinition·findReferences 등)를 우선** 사용합니다(kotlin-lsp 플러그인 활성화됨).
 - 기능 구현이나 버그 수정처럼 동작 변경이 있는 작업은 기본적으로 TDD를 수행합니다.
 - 먼저 실패하는 테스트로 기대 동작을 고정한 뒤, 최소 구현으로 통과시키고 필요한 리팩터링을 진행합니다.

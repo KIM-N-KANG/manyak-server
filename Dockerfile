@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk-alpine AS builder
+FROM --platform=$BUILDPLATFORM eclipse-temurin:25-jdk-alpine AS builder
 
 WORKDIR /app
 
@@ -7,7 +7,7 @@ COPY . .
 RUN chmod +x ./gradlew
 RUN ./gradlew bootJar --no-daemon
 
-FROM eclipse-temurin:21-jre-alpine AS runtime-base
+FROM eclipse-temurin:25-jre-alpine AS runtime-base
 
 WORKDIR /app
 

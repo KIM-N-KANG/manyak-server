@@ -777,7 +777,7 @@ class SimpleStoryCompilePersistenceIntegrationTests : ScriptedAiIntegrationTest(
     private fun memberTrialUsed(userId: Long) =
         trials.usage(userId, null, com.knk.manyak.credit.service.GuestTrialLimitService.Counter.STORY_CREATION).used
 
-    private fun requestStatuses(): List<String> =
+    private fun requestStatuses(): List<String?> =
         jdbc.queryForList("SELECT status FROM story_creation_requests WHERE stage = 'STORY_COMPLETION'", String::class.java)
 
     private val duplicateEndings = listOf(

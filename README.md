@@ -1,6 +1,6 @@
 # manyak-server
 
-Manyak 백엔드 서버입니다. Kotlin, Spring Boot, Java 21, Gradle, JPA, Flyway, Security, PostgreSQL을 사용합니다.
+Manyak 백엔드 서버입니다. Kotlin, Spring Boot, Java 25, Gradle, JPA, Flyway, Security, PostgreSQL을 사용합니다.
 
 ## 로컬 실행
 
