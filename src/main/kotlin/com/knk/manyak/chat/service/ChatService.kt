@@ -885,7 +885,7 @@ class ChatService(
                     // 이 판정을 워커에만 두어 타임아웃-저장 경합을 없앤다(onCompletion은 환불하지 않음, Codex P1). gate로 1회.
                     val persistedOk = persisted.get()
                     // 결과 판정은 이 finally·큐 대기 중 마감·스케줄 거부 catch 셋뿐이고 서로 배타적이다(KNK-811).
-                    deadline?.cancel(false)
+                    deadline.cancel(false)
                     events.finish()
                     if (persistedOk) {
                         // 성공 시 turnSaveTransactionTemplate.execute의 턴 커밋 뒤에만 키를 해제한다.

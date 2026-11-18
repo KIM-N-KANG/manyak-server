@@ -71,7 +71,7 @@ class CreditPolicyTransactionIsolationIntegrationTest : IntegrationTest() {
 
         // 커밋이 실제로 됐는지는 트랜잭션 밖에서 다시 읽어 확인한다(rollback-only 였다면 행이 없다).
         assertThat(savedId).isNotNull()
-        assertThat(userRepository.findById(savedId!!)).isPresent()
+        assertThat(userRepository.findById(savedId)).isPresent()
     }
 
     @Test

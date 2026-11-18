@@ -46,7 +46,7 @@ class AdminStoryConsumptionRepository(private val jdbc: NamedParameterJdbcTempla
         """, params(from, until, excluded, officialId)) { rs, _ ->
             AdminStoryConsumptionCounts(rs.getLong("public_stories"), rs.getLong("official_stories"), rs.getLong("played_stories"),
                 rs.getLong("other_chats"), rs.getLong("top_chats"))
-        }!!
+        }
 
     fun ranking(from: Instant, until: Instant, excluded: List<Long>, officialId: Long?, limit: Int): List<AdminStoryConsumptionRank> =
         jdbc.query("""${consumption(excluded)} SELECT public_id,title,
@@ -74,5 +74,5 @@ class AdminStoryConsumptionRepository(private val jdbc: NamedParameterJdbcTempla
             val previous = rs.getLong("previous_members"); val retained = rs.getLong("retained")
             AdminStoryCreators(active, members, if (active == 0L) null else members.toDouble() / active,
                 previous, retained, if (previous == 0L) null else retained.toDouble() / previous)
-        }!!
+        }
 }

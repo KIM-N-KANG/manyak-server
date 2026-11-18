@@ -64,7 +64,7 @@ class UserPersonaConcurrencyIntegrationTests : IntegrationTest() {
                     selected.countDown()
                     assertTrue(release.await(10, TimeUnit.SECONDS))
                     result
-                }!!
+                }
             }
             assertTrue(selected.await(10, TimeUnit.SECONDS))
             val changed = pool.submit {

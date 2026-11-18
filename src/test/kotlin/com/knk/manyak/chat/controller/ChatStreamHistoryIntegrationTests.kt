@@ -130,7 +130,7 @@ class ChatStreamHistoryIntegrationTests : ScriptedAiIntegrationTest() {
     private fun statistics() =
         entityManagerFactory.unwrap(org.hibernate.SessionFactory::class.java).statistics
 
-    private fun endingLoadCount() =
+    private fun endingLoadCount(): Long =
         statistics().getEntityStatistics("com.knk.manyak.story.entity.StoryEnding").loadCount
 
     @Autowired

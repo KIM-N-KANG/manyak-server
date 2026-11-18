@@ -28,7 +28,7 @@ class PushDeliveryRepository(private val jdbc: JdbcTemplate) {
         SELECT COUNT(CASE WHEN delivered_devices > 0 THEN 1 END) AS members,
                COALESCE(SUM(delivered_devices), 0) AS delivered, COALESCE(SUM(failed_devices), 0) AS failed
         FROM push_delivery_results WHERE campaign_id = ?
-    """.trimIndent(), { rs, _ -> CampaignDeliveryStats(rs.getLong("members"), rs.getLong("delivered"), rs.getLong("failed")) }, campaignId)!!
+    """.trimIndent(), { rs, _ -> CampaignDeliveryStats(rs.getLong("members"), rs.getLong("delivered"), rs.getLong("failed")) }, campaignId)
 
     fun dailyStats(from: LocalDate, to: LocalDate, type: PushDeliveryType?, kind: PushKind? = null): List<PushDeliveryStatsItem> {
         val zone = ZoneId.of("Asia/Seoul")

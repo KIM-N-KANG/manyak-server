@@ -57,5 +57,5 @@ class AdminCreditMetricsRepository(private val jdbc: NamedParameterJdbcTemplate)
             AdminCreditBalanceBucket("100~499", rs.getLong("medium_members")), AdminCreditBalanceBucket("500~1999", rs.getLong("large_members")),
             AdminCreditBalanceBucket("2000+", rs.getLong("high_members"))),
             rs.getLong("purchased"), rs.getLong("rewarded"), rs.getLong("legacy"), rs.getLong("expiring"))
-    }!!
+    }
 }

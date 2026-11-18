@@ -218,7 +218,7 @@ class StoryService(
     private fun epochNanosOf(instant: Instant): Long = instant.epochSecond * 1_000_000_000L + instant.nano
 
     private fun instantOfEpochNanos(nanos: Long): Instant =
-        Instant.ofEpochSecond(Math.floorDiv(nanos, 1_000_000_000L), Math.floorMod(nanos, 1_000_000_000L).toLong())
+        Instant.ofEpochSecond(Math.floorDiv(nanos, 1_000_000_000L), Math.floorMod(nanos, 1_000_000_000L))
 
     @Transactional(readOnly = true)
     fun getStoryDetail(storyId: String, userId: Long?): StoryDetailResponse {

@@ -115,7 +115,7 @@ class SubmissionClaimPostgresTests {
                     tx.execute {
                         assertEquals(1, adminStore.lock(publicId)!!.attempt)
                         adminStore.release(publicId, now)
-                    }!!
+                    }
                 }
             }
             check(ready.await(10, TimeUnit.SECONDS))
