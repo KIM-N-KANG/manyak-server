@@ -10,20 +10,34 @@ import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
 
-data class PushOutboxRow(val id: Long, val message: PushMessage, val attempts: Int, val createdAt: Instant, val leaseUntil: Instant)
+/** [trace]는 기록 스팬의 추적 헤더다. 스팬 밖에서 기록한 행은 null이다(NOTIFICATION 3-2-7). */
+data class PushOutboxRow(
+    val id: Long, val message: PushMessage, val attempts: Int, val createdAt: Instant, val leaseUntil: Instant,
+    val trace: OutboxTraceHeaders? = null,
+)
 
 /** 도메인 기록은 기존 트랜잭션에 참여하고, 선점·발행 결과는 짧은 독립 트랜잭션으로 확정한다. */
 @Repository
 @ConditionalOnProperty(name = ["manyak.push.mode"], havingValue = "remote")
-class PushOutboxStore(private val jdbc: JdbcTemplate, private val mapper: ObjectMapper) {
-    /** 기록만 별도로 커밋하면 완료 상태와 알림이 어긋나므로 트랜잭션 없는 호출은 거부한다. */
+class PushOutboxStore(
+    private val jdbc: JdbcTemplate,
+    private val mapper: ObjectMapper,
+    private val traceRecorder: OutboxTraceRecorder = OutboxTraceRecorder.NONE,
+) {
+    /**
+     * 기록만 별도로 커밋하면 완료 상태와 알림이 어긋나므로 트랜잭션 없는 호출은 거부한다.
+     * 요청이나 작업의 스팬 안이면 메시지마다 기록 스팬을 만들어 그 추적 헤더를 함께 저장한다(KNK-2097).
+     */
     @Transactional(propagation = Propagation.MANDATORY)
-    fun insert(message: PushMessage, now: Instant): Int =
-        jdbc.update("""
-            INSERT INTO push_outbox(message_id, payload, status, attempts, next_attempt_at, created_at)
-            VALUES (?, CAST(? AS jsonb), 'PENDING', 0, ?, ?)
+    fun insert(message: PushMessage, now: Instant): Int {
+        val trace = traceRecorder.record()
+        return jdbc.update("""
+            INSERT INTO push_outbox(message_id, payload, status, attempts, next_attempt_at, created_at, trace_parent, trace_state)
+            VALUES (?, CAST(? AS jsonb), 'PENDING', 0, ?, ?, ?, ?)
             ON CONFLICT (message_id) DO NOTHING
-        """.trimIndent(), message.messageId, mapper.writeValueAsString(message), Timestamp.from(now), Timestamp.from(now))
+        """.trimIndent(), message.messageId, mapper.writeValueAsString(message), Timestamp.from(now), Timestamp.from(now),
+            trace?.traceParent, trace?.traceState)
+    }
 
     /**
      * 예약 회차의 요청을 [INSERT_CHUNK]건마다 한 문장으로 기록하고 실제로 넣은 행 수를 돌려준다.
@@ -31,14 +45,18 @@ class PushOutboxStore(private val jdbc: JdbcTemplate, private val mapper: Object
      */
     @Transactional(propagation = Propagation.MANDATORY)
     fun insertAll(messages: List<PushMessage>, now: Instant): Int = messages.chunked(INSERT_CHUNK).sumOf { chunk ->
+        // 스케줄러 회차는 스팬이 없어 모두 null이다. 스팬 안에서 부르면 [insert]처럼 메시지마다 기록 스팬을 만든다.
+        val traces = chunk.map { traceRecorder.record() }
         jdbc.update("""
-            INSERT INTO push_outbox(message_id, payload, status, attempts, next_attempt_at, created_at)
-            SELECT m.message_id, CAST(m.payload AS jsonb), 'PENDING', 0, ?, ?
-            FROM unnest(CAST(? AS text[]), CAST(? AS text[])) WITH ORDINALITY AS m(message_id, payload, ord)
+            INSERT INTO push_outbox(message_id, payload, status, attempts, next_attempt_at, created_at, trace_parent, trace_state)
+            SELECT m.message_id, CAST(m.payload AS jsonb), 'PENDING', 0, ?, ?, m.trace_parent, m.trace_state
+            FROM unnest(CAST(? AS text[]), CAST(? AS text[]), CAST(? AS text[]), CAST(? AS text[]))
+                WITH ORDINALITY AS m(message_id, payload, trace_parent, trace_state, ord)
             ORDER BY m.ord
             ON CONFLICT (message_id) DO NOTHING
         """.trimIndent(), Timestamp.from(now), Timestamp.from(now),
-            chunk.map { it.messageId }.toTypedArray(), chunk.map { mapper.writeValueAsString(it) }.toTypedArray())
+            chunk.map { it.messageId }.toTypedArray(), chunk.map { mapper.writeValueAsString(it) }.toTypedArray(),
+            traces.map { it?.traceParent }.toTypedArray(), traces.map { it?.traceState }.toTypedArray())
     }
 
     /**
@@ -50,12 +68,13 @@ class PushOutboxStore(private val jdbc: JdbcTemplate, private val mapper: Object
     fun claim(now: Instant, lease: Duration, batchSize: Int): List<PushOutboxRow> {
         val until = now.plus(lease)
         val rows = jdbc.query("""
-            SELECT id, payload, attempts, created_at FROM push_outbox
+            SELECT id, payload, attempts, created_at, trace_parent, trace_state FROM push_outbox
             WHERE status = 'PENDING' AND next_attempt_at <= ?
             ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED
         """.trimIndent(), { rs, _ ->
             PushOutboxRow(rs.getLong("id"), mapper.readValue(rs.getString("payload"), PushMessage::class.java),
-                rs.getInt("attempts"), rs.getTimestamp("created_at").toInstant(), until)
+                rs.getInt("attempts"), rs.getTimestamp("created_at").toInstant(), until,
+                rs.getString("trace_parent")?.let { OutboxTraceHeaders(it, rs.getString("trace_state")) })
         }, Timestamp.from(now), batchSize)
         // 위 SELECT가 이 트랜잭션에서 이미 잠근 행만 갱신하므로 한 문장으로 묶어도 잠금 대상과 시점이 같다.
         if (rows.isNotEmpty()) jdbc.update("UPDATE push_outbox SET next_attempt_at = ? WHERE id = ANY(?)",

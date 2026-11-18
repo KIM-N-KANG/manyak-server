@@ -12,13 +12,11 @@ import java.util.concurrent.CompletableFuture
 
 class KafkaPushPublisherTests {
     @Test
-    fun `비동기 제출 전에 호출 스레드의 추적 헤더를 Kafka 레코드에 담는다`() {
+    fun `릴레이가 정한 추적 헤더를 Kafka 레코드 헤더에 담는다`() {
         @Suppress("UNCHECKED_CAST")
         val kafka = mock(KafkaTemplate::class.java) as KafkaTemplate<String, String>
         val mapper = ObjectMapper()
         val message = PushMessage("id", "recipient", data = emptyMap(), requestId = "unknown", sessionId = "unknown")
-        val caller = Thread.currentThread()
-        var injected = false
         `when`(kafka.send(any<ProducerRecord<String, String>>())).thenAnswer {
             val record = it.getArgument<ProducerRecord<String, String>>(0)
             assertThat(record.topic()).isEqualTo("push.requested")
@@ -28,18 +26,22 @@ class KafkaPushPublisherTests {
             assertThat(String(record.headers().lastHeader("tracestate").value(), Charsets.UTF_8)).isEqualTo("vendor=value")
             CompletableFuture.completedFuture<SendResult<String, String>>(null)
         }
-        // 기존 구현이 쓰는 오버로드도 완료시켜 헤더 주입 여부로 red를 확인한다.
-        `when`(kafka.send("push.requested", message.recipientId, mapper.writeValueAsString(message)))
-            .thenReturn(CompletableFuture.completedFuture(null))
-        KafkaPushPublisher(kafka, mapper) { sink ->
-            assertThat(Thread.currentThread()).isSameAs(caller)
-            injected = true
-            sink("traceparent", "00-trace-span-01")
-            sink("tracestate", "vendor=value")
-        }.use { publisher ->
-            publisher.publish(message).join()
+        KafkaPushPublisher(kafka, mapper).use { publisher ->
+            publisher.publish(message, mapOf("traceparent" to "00-trace-span-01", "tracestate" to "vendor=value")).join()
         }
-        assertThat(injected).isTrue()
+        verify(kafka).send(any<ProducerRecord<String, String>>())
+    }
+
+    @Test
+    fun `추적 헤더가 없으면 레코드 헤더를 붙이지 않는다`() {
+        @Suppress("UNCHECKED_CAST")
+        val kafka = mock(KafkaTemplate::class.java) as KafkaTemplate<String, String>
+        val message = PushMessage("id", "recipient", data = emptyMap(), requestId = "unknown", sessionId = "unknown")
+        `when`(kafka.send(any<ProducerRecord<String, String>>())).thenAnswer {
+            assertThat(it.getArgument<ProducerRecord<String, String>>(0).headers().toArray()).isEmpty()
+            CompletableFuture.completedFuture<SendResult<String, String>>(null)
+        }
+        KafkaPushPublisher(kafka, ObjectMapper()).use { it.publish(message, emptyMap()).join() }
         verify(kafka).send(any<ProducerRecord<String, String>>())
     }
 }

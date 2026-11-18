@@ -50,6 +50,7 @@ class PushOutboxPostgresTests {
         }
         val migration = java.io.File("src/main/resources/db/migration/V86__create_push_outbox.sql").readText()
         jdbc.execute(migration)
+        jdbc.execute(java.io.File("src/main/resources/db/migration/V128__push_outbox_trace_context.sql").readText())
         val manager = DataSourceTransactionManager(ds)
         tx = TransactionTemplate(manager)
         context = AnnotationConfigApplicationContext()
@@ -189,6 +190,30 @@ class PushOutboxPostgresTests {
             .containsExactly(now.plusSeconds(60), now.plusSeconds(60), now)
         assertThat(store.claim(now, Duration.ofSeconds(60), 2).map { it.message.messageId }).containsExactly("lease:3")
         assertThat(store.claim(now, Duration.ofSeconds(60), 2)).isEmpty()
+    }
+    @Test fun `스팬 안에서 기록한 행은 메시지마다 기록 스팬의 추적 헤더를 저장하고 선점에서 돌려준다`() {
+        var seq = 0
+        val traced = PushOutboxStore(jdbc, mapper) {
+            seq++
+            OutboxTraceHeaders("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b$seq-01", if (seq == 1) "vendor=value" else null)
+        }
+        tx.executeWithoutResult {
+            traced.insert(PushMessage("trace:1", "r1", data = mapOf("type" to "NOTICE"), requestId = "t", sessionId = "s"), now)
+            traced.insertAll((2..3).map { PushMessage("trace:$it", "r$it", data = mapOf("type" to "NOTICE"), requestId = "t", sessionId = "s") }, now)
+        }
+        assertThat(traced.claim(now, Duration.ofSeconds(60), 100).map { it.trace }).containsExactly(
+            OutboxTraceHeaders("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b1-01", "vendor=value"),
+            OutboxTraceHeaders("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b2-01", null),
+            OutboxTraceHeaders("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b3-01", null),
+        )
+    }
+    @Test fun `스팬 밖에서 기록한 행은 추적 헤더 컬럼을 비운다`() {
+        tx.executeWithoutResult {
+            store.insert(PushMessage("plain:1", "r1", data = mapOf("type" to "NOTICE"), requestId = "t", sessionId = "s"), now)
+            store.insertAll(listOf(PushMessage("plain:2", "r2", data = mapOf("type" to "NOTICE"), requestId = "t", sessionId = "s")), now)
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM push_outbox WHERE trace_parent IS NULL AND trace_state IS NULL", Int::class.java)).isEqualTo(2)
+        assertThat(store.claim(now, Duration.ofSeconds(60), 100).map { it.trace }).containsExactly(null, null)
     }
     @Test fun `회차 기록은 대상 순서대로 쌓이고 같은 회차의 중복 대상은 한 건으로 센다`() {
         val writer = context.getBean(ScheduledPushOutboxWriter::class.java)

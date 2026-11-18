@@ -18,7 +18,7 @@ class PushOutboxRelayTests {
     private val meters = SimpleMeterRegistry()
     private val message = PushMessage("story-completed:request", "recipient", data = mapOf("type" to "STORY_COMPLETED"), requestId = "trace", sessionId = "session")
     private fun row(attempts: Int = 0, created: Instant = now) = PushOutboxRow(1, message, attempts, created, now.plusSeconds(60))
-    private fun relay(success: Boolean) = PushOutboxRelay(store, PushPublisher {
+    private fun relay(success: Boolean) = PushOutboxRelay(store, PushPublisher { _, _ ->
         if (success) CompletableFuture.completedFuture(Unit)
         else CompletableFuture.failedFuture(IllegalStateException("offline"))
     }, settings, meters, Clock.fixed(now, ZoneOffset.UTC))
@@ -46,11 +46,11 @@ class PushOutboxRelayTests {
         `when`(store.claim(now, settings.lease, settings.batchSize)).thenReturn(listOf(expired, older, live))
         listOf(expired, older).forEach { `when`(store.fail(it, now, true)).thenReturn(1) }
         val publisher = mock(PushPublisher::class.java)
-        `when`(publisher.publish(live.message)).thenReturn(CompletableFuture.completedFuture(Unit))
+        `when`(publisher.publish(live.message, emptyMap())).thenReturn(CompletableFuture.completedFuture(Unit))
 
         PushOutboxRelay(store, publisher, settings, meters, Clock.fixed(now, ZoneOffset.UTC)).poll()
 
-        verify(publisher, times(1)).publish(live.message)
+        verify(publisher, times(1)).publish(live.message, emptyMap())
         listOf(expired, older).forEach { verify(store).fail(it, now, true) }
         assertThat(meters.get("manyak.push.outbox.result").tag("outcome", "abandoned").counter().count()).isEqualTo(2.0)
     }
@@ -63,11 +63,11 @@ class PushOutboxRelayTests {
         `when`(store.fail(expired, now, true)).thenThrow(IllegalStateException("DB unavailable"))
         `when`(store.fail(lost, now, true)).thenReturn(0)
         val publisher = mock(PushPublisher::class.java)
-        `when`(publisher.publish(live.message)).thenReturn(CompletableFuture.completedFuture(Unit))
+        `when`(publisher.publish(live.message, emptyMap())).thenReturn(CompletableFuture.completedFuture(Unit))
 
         PushOutboxRelay(store, publisher, settings, meters, Clock.fixed(now, ZoneOffset.UTC)).poll()
 
-        verify(publisher, times(1)).publish(live.message)
+        verify(publisher, times(1)).publish(live.message, emptyMap())
         verify(store).complete(live, now)
         assertThat(meters.get("manyak.push.outbox.result").tag("outcome", "abandoned").counter().count()).isZero()
     }
@@ -85,7 +85,7 @@ class PushOutboxRelayTests {
         val observations = mutableListOf<Observation>()
         val first = CompletableFuture<Unit>()
         val failure = IllegalStateException("offline")
-        val relay = PushOutboxRelay(store, PushPublisher {
+        val relay = PushOutboxRelay(store, PushPublisher { _, _ ->
             val observation = registry.currentObservation
             assertThat(observation?.context?.name).isEqualTo("push.outbox.publish")
             observations.add(observation!!)
@@ -110,7 +110,7 @@ class PushOutboxRelayTests {
         val clock = mock(Clock::class.java)
         `when`(clock.instant()).thenReturn(now, now, now.plusSeconds(1))
         `when`(store.claim(now, settings.lease, settings.batchSize)).thenReturn(listOf(row))
-        val publisher = PushPublisher { CompletableFuture.failedFuture<Unit>(IllegalStateException("offline")) }
+        val publisher = PushPublisher { _, _ -> CompletableFuture.failedFuture<Unit>(IllegalStateException("offline")) }
 
         PushOutboxRelay(store, publisher, settings, meters, clock).poll()
 
@@ -122,7 +122,7 @@ class PushOutboxRelayTests {
         `when`(store.claim(now, settings.lease, settings.batchSize)).thenReturn(rows)
         val first = CompletableFuture<Unit>()
         var calls = 0
-        val relay = PushOutboxRelay(store, PushPublisher {
+        val relay = PushOutboxRelay(store, PushPublisher { _, _ ->
             calls++
             if (calls == 1) first else { first.complete(Unit); CompletableFuture.completedFuture(Unit) }
         }, settings, meters, Clock.fixed(now, ZoneOffset.UTC))

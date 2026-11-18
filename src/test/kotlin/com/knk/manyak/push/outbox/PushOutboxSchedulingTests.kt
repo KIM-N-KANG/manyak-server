@@ -42,7 +42,7 @@ class PushOutboxSchedulingTests {
             context.registerBean(PushOutboxStore::class.java, Supplier { store })
             context.registerBean(Clock::class.java, Supplier { Clock.fixed(now, ZoneOffset.UTC) })
             context.registerBean(SimpleMeterRegistry::class.java, Supplier { SimpleMeterRegistry() })
-            context.registerBean(PushPublisher::class.java, Supplier { PushPublisher { started.countDown(); delivery } })
+            context.registerBean(PushPublisher::class.java, Supplier { PushPublisher { _, _ -> started.countDown(); delivery } })
             context.registerBean(OtherScheduledWork::class.java, Supplier { OtherScheduledWork(started, otherTaskRan) })
             context.register(OutboxSchedulingTestConfig::class.java)
             context.refresh()

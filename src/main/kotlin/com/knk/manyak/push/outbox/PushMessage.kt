@@ -19,7 +19,8 @@ data class PushMessage(
 
 /** 브로커의 확인까지 비동기로 완료한다. */
 fun interface PushPublisher {
-    fun publish(message: PushMessage): CompletableFuture<Unit>
+    /** [traceHeaders]는 릴레이가 정한 추적 헤더(행에 저장된 값이나 릴레이 스팬의 값)로, 본문이 아니라 메시지 속성에 싣는다. */
+    fun publish(message: PushMessage, traceHeaders: Map<String, String>): CompletableFuture<Unit>
 }
 
 /**
