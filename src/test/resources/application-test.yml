@@ -42,6 +42,9 @@ manyak:
     opensearch:
       endpoint: ""
       reindex-on-startup: false
+    reindex-schedule:
+      # 정기 재색인 스케줄러를 끈다. 테스트는 스케줄러를 직접 호출한다.
+      enabled: false
   push:
     credit-expiry-reminder:
       enabled: false

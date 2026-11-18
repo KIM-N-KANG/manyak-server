@@ -215,10 +215,21 @@ manyak:
     privacy-version: ${MANYAK_LEGAL_PRIVACY_VERSION:v1.8}
   search:
     opensearch:
+      # 홈서버 OpenSearch의 터널 주소(스킴, 경로 없는 호스트, https 443). 관리형 도메인 주소(*.amazonaws.com)면
+      # 전환 기간 동안 SigV4로 붙는다(KNK-2101). region은 그 SigV4 경로에서만 쓴다.
       endpoint: ${MANYAK_OPENSEARCH_ENDPOINT:}
       region: ${AWS_REGION:ap-northeast-2}
       story-index: ${MANYAK_OPENSEARCH_STORY_INDEX:stories-dev}
       reindex-on-startup: ${MANYAK_OPENSEARCH_REINDEX_ON_STARTUP:false}
+      # 환경별 검색 전용 계정과 Cloudflare Access 서비스 토큰. 각 쌍은 둘 다 있거나 둘 다 비어야 한다(한쪽만 있으면 기동 실패).
+      username: ${MANYAK_OPENSEARCH_USERNAME:}
+      password: ${MANYAK_OPENSEARCH_PASSWORD:}
+      access-client-id: ${MANYAK_OPENSEARCH_ACCESS_CLIENT_ID:}
+      access-client-secret: ${MANYAK_OPENSEARCH_ACCESS_CLIENT_SECRET:}
+    reindex-schedule:
+      # 매일 04:30(KST) 전체 재색인(STORY 4-1-27). Redis 날짜 키로 인스턴스 하나만 실행한다.
+      enabled: ${MANYAK_SEARCH_REINDEX_SCHEDULE_ENABLED:true}
+      cron: ${MANYAK_SEARCH_REINDEX_SCHEDULE_CRON:0 30 4 * * *}
   # 마냑 공식 계정(오리지널 스토리 소유자)의 user public_id(UUID). 운영은 env로 주입하며,
   # 미설정(빈 값)이면 GET /stories?filter=original은 빈 페이지(items: [], nextCursor: null)를 반환한다.
   official-user-public-id: ${MANYAK_OFFICIAL_USER_PUBLIC_ID:}

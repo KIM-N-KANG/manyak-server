@@ -1,8 +1,12 @@
 # 일반 제작 준비는 회원 검수 제출(202) → 승인 알림 → 제출본 조회 → 라이브 조회 순서입니다. accessToken이 필요합니다.
-# 공개 스토리 검색(KNK-1141). IntelliJ HTTP Client에서 위부터 순서대로 실행한다.
-# 사전 준비: Postgres·Redis 기동, 검색 FGAC/nori 설정(opensearch/README.md), ./gradlew bootRun.
+# 공개 스토리 검색(KNK-1141, 저장소 이전과 대체 검색 KNK-2101). IntelliJ HTTP Client에서 위부터 순서대로 실행한다.
+# 사전 준비: Postgres·Redis 기동, ./gradlew bootRun.
+#   검색 저장소는 analysis-nori가 설치된 OpenSearch다. 홈서버에 붙을 때는 MANYAK_OPENSEARCH_ENDPOINT(터널 호스트),
+#   MANYAK_OPENSEARCH_USERNAME/PASSWORD(환경별 검색 계정), MANYAK_OPENSEARCH_ACCESS_CLIENT_ID/SECRET(Cloudflare Access 토큰)을
+#   셸 환경에만 넣는다. 값은 이 파일이나 로그에 남기지 않는다. 각 쌍은 둘 다 넣거나 둘 다 비운다(한쪽만 있으면 기동 실패).
 # accessToken은 로그인 검증 파일에서 발급해 client.global.set으로 저장한다.
 # 검색 미설정 503 케이스만 OpenSearch endpoint를 비우고 재기동한 뒤 따로 실행한다.
+# 저장소 장애 케이스는 endpoint를 응답하지 않는 호스트로 두거나 계정 비밀번호를 틀리게 두고 재기동한 뒤 따로 실행한다.
 @baseUrl = http://localhost:8080
 
 ### 1. 헬스 체크
@@ -200,15 +204,40 @@ GET {{baseUrl}}/api/v1/stories/search?q=검색검증&limit=50
   });
 %}
 
-### 인덱스 미존재(격리된 검증 환경에서 아직 생성되지 않은 인덱스를 조회할 때만 실행)
-# 기동 시 인덱스 보장이 먼저 완료되면 일반 빈 결과와 같은 응답이다. 공유 인덱스를 삭제하지 않는다.
-GET {{baseUrl}}/api/v1/stories/search?q=knk1216nomatch
+### 11. 저장소 장애 중 커서 없는 요청은 DB 대체 검색(장애 환경으로 재기동 후, 2번 준비 스토리 승인 뒤 실행)
+# 인덱스가 없을 때도 같다(KNK-2101부터 빈 목록이 아니다). 공유 인덱스를 지우지 않는다. 응답은 3초 안팎에 온다.
+# 서버 로그에 "스토리 검색 실패 (error=...)" WARN이 남고 /actuator/metrics/manyak.story.search.fallback이 1 늘어난다.
+GET {{baseUrl}}/api/v1/stories/search?q=검색검증 마법
 
 > {%
-  client.test("미존재 인덱스는 빈 페이지", () => {
+  client.test("대체 검색은 200과 다음 커서 없음", () => {
     client.assert(response.status === 200, `actual=${response.status}`);
-    client.assert(response.body.items.length === 0 && response.body.nextCursor === null,
-      `actual=${JSON.stringify(response.body)}`);
+    client.assert(response.body.nextCursor === null, `actual=${JSON.stringify(response.body.nextCursor)}`);
+  });
+  client.test("제목 부분 일치로 준비 스토리를 찾는다", () => {
+    client.assert(response.body.items.some(i => i.id === client.global.get("fixtureStoryId")),
+      `actual=${JSON.stringify(response.body.items.map(i => i.id))}`);
+  });
+%}
+
+### 12. 대체 검색은 %와 _를 문자 그대로 비교한다(11번과 같은 장애 환경)
+GET {{baseUrl}}/api/v1/stories/search?q=검색%25검증
+
+> {%
+  client.test("와일드카드로 해석하지 않는다", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    client.assert(!response.body.items.some(i => i.id === client.global.get("fixtureStoryId")),
+      `actual=${JSON.stringify(response.body.items.map(i => i.id))}`);
+  });
+%}
+
+### 13. 저장소 장애 중 커서 있는 요청은 503(11번과 같은 장애 환경, 4번에서 받은 nextCursor 사용)
+GET {{baseUrl}}/api/v1/stories/search?q=왕국&cursor={{storySearchCursor}}
+
+> {%
+  client.test("커서 요청은 대체하지 않고 503", () => {
+    client.assert(response.status === 503, `actual=${response.status}`);
+    client.assert(response.body.code === "SERVICE_UNAVAILABLE", `actual=${response.body.code}`);
   });
 %}
 

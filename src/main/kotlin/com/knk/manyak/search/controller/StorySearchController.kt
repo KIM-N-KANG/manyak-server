@@ -20,11 +20,11 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/stories")
 class StorySearchController(private val storySearchService: StorySearchService) {
 
-    @Operation(summary = "공개 스토리 검색", description = "검색어는 trim 후 2~100자이며 관련도순으로 반환합니다. 다음 페이지는 같은 q와 nextCursor를 사용합니다.")
+    @Operation(summary = "공개 스토리 검색", description = "검색어는 trim 후 2~100자이며 관련도순으로 반환합니다. 다음 페이지는 같은 q와 nextCursor를 사용합니다. 검색 저장소 장애 중 커서 없는 요청은 DB 부분 일치 최신순 한 페이지를 nextCursor 없이 반환합니다.")
     @ApiResponses(value = [
         ApiResponse(responseCode = "200", description = "검색 성공", content = [Content(schema = Schema(implementation = StoryPageResponse::class))]),
         ApiResponse(responseCode = "400", description = "검색어·커서 형식 오류", content = [Content(schema = Schema(hidden = true))]),
-        ApiResponse(responseCode = "503", description = "검색 미설정 또는 일시적 장애", content = [Content(schema = Schema(hidden = true))]),
+        ApiResponse(responseCode = "503", description = "검색 미설정 또는 저장소 장애 중 커서 요청", content = [Content(schema = Schema(hidden = true))]),
     ])
     @GetMapping("/search")
     fun searchStories(

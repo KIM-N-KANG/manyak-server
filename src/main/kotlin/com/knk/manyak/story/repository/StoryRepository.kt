@@ -26,6 +26,20 @@ interface StoryRepository : JpaRepository<Story, Long> {
     """)
     fun findExploreCandidates(@Param("requesterId") requesterId: Long?): List<StoryExploreCandidate>
 
+    /**
+     * 검색 대체 검색(STORY 4-1-3)의 후보. 제목, 한 줄 소개, 장르 문자열 가운데 하나가 [pattern]과 LIKE로 맞는 스토리를
+     * 생성 시각 내림차순, 공개 식별자 오름차순으로 읽는다. 노출 조건은 여기서 거르지 않고 호출자가
+     * [com.knk.manyak.story.entity.Story.isPubliclyListed]로 판정한다. [pattern]은 소문자이고 `\`로 이스케이프돼 있어야 한다.
+     */
+    @Query("""
+        SELECT s FROM Story s
+        WHERE LOWER(s.title) LIKE :pattern ESCAPE '\'
+           OR LOWER(s.oneLineIntro) LIKE :pattern ESCAPE '\'
+           OR LOWER(s.genre) LIKE :pattern ESCAPE '\'
+        ORDER BY s.createdAt DESC, s.publicId ASC
+    """)
+    fun findTextMatches(@Param("pattern") pattern: String, pageable: Pageable): List<Story>
+
     // 공개 여부와 무관하게 삭제되지 않은 소유 스토리의 ID를 조회한다.
     @Query(
         """
