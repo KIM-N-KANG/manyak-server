@@ -34,9 +34,10 @@ class GlobalExceptionHandler {
         request: HttpServletRequest,
     ): ResponseEntity<ApiErrorResponse> {
         val status = HttpStatus.valueOf(exception.statusCode.value())
-        logResponseStatusException(exception, request, status)
-        // 예상하지 못한 5xx만 Sentry로 보낸다. 예상 가능한 4xx(BAD_REQUEST/NOT_FOUND/CONFLICT 등)는 제외한다.
-        if (status.is5xxServerError) {
+        val reportable = (exception as? CodedResponseStatusException)?.reportable != false
+        logResponseStatusException(exception, request, status, reportable)
+        // 예상하지 못한 5xx만 Sentry로 보낸다. 예상 가능한 4xx(BAD_REQUEST/NOT_FOUND/CONFLICT 등)와 보고 제외 5xx는 뺀다.
+        if (status.is5xxServerError && reportable) {
             captureToSentry(exception, request, status, status.name)
         }
         return ResponseEntity
@@ -57,10 +58,17 @@ class GlobalExceptionHandler {
         exception: ResponseStatusException,
         request: HttpServletRequest,
         status: HttpStatus,
+        reportable: Boolean,
     ) {
         val reason = exception.reason ?: status.reasonPhrase
         val cause = exception.cause
         when {
+            // 원인이 이미 다른 로그에 남은 예상된 5xx(검색 저장소 장애 중 커서 요청의 503)는 스택 없이 DEBUG 한 줄.
+            !reportable ->
+                log.debug(
+                    "ResponseStatusException occurred: status={}, path={}, reason={}",
+                    status.value(), request.requestURI, reason,
+                )
             // 예상하지 못한 5xx만 스택트레이스까지 남긴다(Sentry 캡처도 5xx 전용).
             status.is5xxServerError ->
                 log.error(

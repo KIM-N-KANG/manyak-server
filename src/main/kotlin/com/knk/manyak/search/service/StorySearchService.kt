@@ -1,5 +1,6 @@
 package com.knk.manyak.search.service
 
+import com.knk.manyak.global.error.CodedResponseStatusException
 import com.knk.manyak.search.config.StorySearchProperties
 import com.knk.manyak.search.dto.StorySearchCursor
 import com.knk.manyak.search.dto.StorySearchDocument
@@ -73,7 +74,9 @@ class StorySearchService(
             val cause = (ex as? ExecutionException)?.cause ?: ex
             // 질의 원문이나 자격증명이 포함될 수 있는 외부 오류 본문은 기록하지 않는다. 없는 인덱스도 같은 실패로 본다(결정 28).
             log.warn("스토리 검색 실패 (error={})", cause.javaClass.simpleName)
-            if (after != null) throw ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "검색을 일시적으로 사용할 수 없습니다.")
+            // 원인은 바로 위 WARN에 남으므로 Sentry와 ERROR에서 뺀다(STORY 5-3-8). 응답 code는 그대로 SERVICE_UNAVAILABLE.
+            if (after != null) throw CodedResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, HttpStatus.SERVICE_UNAVAILABLE.name,
+                "검색을 일시적으로 사용할 수 없습니다.", reportable = false)
             fallbacks.increment()
             return StoryPageResponse(items = fallbackStories.searchListedByText(query, pageSize), nextCursor = null)
         }

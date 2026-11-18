@@ -8,6 +8,9 @@ import org.springframework.web.server.ResponseStatusException
  *
  * 같은 HTTP status(예: 402)라도 사유가 다르면 바디 `code`로 구분한다(프론트 분기용). [GlobalExceptionHandler]가
  * 이 [errorCode]를 우선 사용하고, 일반 [ResponseStatusException]이면 기존대로 `status.name`을 코드로 쓴다.
+ *
+ * [reportable]이 false인 5xx는 원인이 이미 다른 로그에 남은 예상된 응답이다. Sentry로 보내지 않고 스택 없이 DEBUG 한 줄만 남긴다.
+ * 지금은 검색 저장소 장애 중 커서 요청의 503만 쓴다(STORY 5-3-8). 다른 5xx에 쓰려면 스펙부터 정한다.
  */
 class CodedResponseStatusException(
     status: HttpStatusCode,
@@ -15,6 +18,7 @@ class CodedResponseStatusException(
     reason: String,
     cause: Throwable? = null,
     val details: List<ApiErrorDetail> = emptyList(),
+    val reportable: Boolean = true,
 ) : ResponseStatusException(status, reason, cause)
 
 /** 바디 `code`로 노출하는 앱 수준 에러 코드. 프론트가 이 값으로 분기하므로 문자열을 임의로 바꾸지 않는다(와이어 계약). */

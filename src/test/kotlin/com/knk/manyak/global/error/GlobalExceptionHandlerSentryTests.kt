@@ -79,6 +79,20 @@ class GlobalExceptionHandlerSentryTests {
     }
 
     @Test
+    fun `검색 미설정 503과 앱 코드가 있는 5xx는 그대로 캡처하고 보고 제외로 표시한 503만 빼고 같은 code로 응답한다`() {
+        handler.handleResponseStatusException(ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "검색이 설정되지 않았습니다."), request())
+        handler.handleResponseStatusException(CodedResponseStatusException(HttpStatus.BAD_GATEWAY, "AI_FAILED", "AI 실패"), request())
+        val quiet = handler.handleResponseStatusException(
+            CodedResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "SERVICE_UNAVAILABLE", "검색을 일시적으로 사용할 수 없습니다.", reportable = false),
+            request(),
+        )
+
+        assertThat(captured.map { it.getTag("status_code") }).containsExactly("503", "502")
+        assertThat(quiet.statusCode.value()).isEqualTo(503)
+        assertThat(quiet.body!!.code).isEqualTo("SERVICE_UNAVAILABLE")
+    }
+
+    @Test
     fun `4xx NOT_FOUND는 캡처하지 않는다`() {
         handler.handleResponseStatusException(
             ResponseStatusException(HttpStatus.NOT_FOUND, "없음"),
