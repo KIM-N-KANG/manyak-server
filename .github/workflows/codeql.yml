@@ -58,9 +58,15 @@ jobs:
           build-mode: ${{ matrix.build-mode }}
 
       # 테스트는 기존 CI가 돌린다. 분석에는 main 소스 컴파일만 필요하다. 데몬과 빌드 캐시를 끄면 추출기가 컴파일을 놓치지 않는다.
+      # Kotlin 컴파일 데몬은 CodeQL 추적 아래에서 연결이 끊겨(DaemonCrashedException) 대체 컴파일로 몇 분을 더 쓰므로 처음부터 in-process로 한다.
+      # in-process 컴파일은 Gradle JVM 안에서 돌아 gradle.properties 힙(1g)으로는 모자라므로 이 잡에서만 힙을 늘린다.
       - name: Build (Kotlin)
         if: matrix.language == 'java-kotlin'
-        run: ./gradlew --no-daemon --no-build-cache classes
+        run: >-
+          ./gradlew --no-daemon --no-build-cache
+          -Pkotlin.compiler.execution.strategy=in-process
+          "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
+          classes
 
       - name: Analyze
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
