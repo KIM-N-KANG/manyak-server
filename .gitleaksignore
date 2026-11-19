@@ -1,0 +1,8 @@
+# gitleaks 오탐(KNK-2111 도입 때 히스토리 전체 검사에서 판별). 커밋 지문(커밋:파일:규칙:줄)으로만 좁게 뺀다.
+# 테스트가 실행 중에 KeyPairGenerator로 만든 RSA 키를 PEM 머리말로 감싸는 코드. 키 값은 소스에 없다.
+c21af95668b2730cc609183ae33f85020c64d98a:src/test/kotlin/com/knk/manyak/credit/config/GooglePlayPaymentPropertiesTests.kt:private-key:85
+f2e622fda4d0bd6830327ac05d60f3d59accf868:src/test/kotlin/com/knk/manyak/push/config/FcmConfigTest.kt:private-key:50
+# 저장소 객체 키 접두사 상수(KEY_PREFIX_CHARACTER = "characters/generated"). 이름에 KEY가 들어가 걸렸다.
+5c9a25e246d4369551e0df47a1c7c6fbc3f33a10:src/main/kotlin/com/knk/manyak/image/service/GeneratedImageObjectKeys.kt:generic-api-key:23
+# 수동 검증 파일의 만료 토큰 예시(2017년 만료, 서명 길이도 HS256 형식이 아님). 파일은 지금 없다.
+1c972954c21017a334c4a85b96eedb2d65fb2f41:http/auth.http:jwt:57

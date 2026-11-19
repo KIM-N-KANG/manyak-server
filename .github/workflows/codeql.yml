@@ -1,0 +1,68 @@
+name: CodeQL
+
+# 코드 정적 분석(KNK-2111). 결과는 Security 탭의 code scanning으로 올리고 PR을 막지 않는다(보고만).
+# Kotlin은 빌드가 있어야 분석되므로 Java 25 툴체인으로 직접 컴파일한다. 기존 CI 시간을 늘리지 않게 별도 워크플로로 둔다.
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev]
+  schedule:
+    - cron: "17 18 * * 0" # 매주 월요일 03:17 KST
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: manual
+          - language: actions
+            build-mode: none
+          - language: javascript-typescript # loadtest/k6
+            build-mode: none
+          - language: python # loadtest/k6/gen-tokens.py
+            build-mode: none
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 25
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Gradle
+        if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # 테스트는 기존 CI가 돌린다. 분석에는 main 소스 컴파일만 필요하다. 데몬과 빌드 캐시를 끄면 추출기가 컴파일을 놓치지 않는다.
+      - name: Build (Kotlin)
+        if: matrix.language == 'java-kotlin'
+        run: ./gradlew --no-daemon --no-build-cache classes
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: "/language:${{ matrix.language }}"
