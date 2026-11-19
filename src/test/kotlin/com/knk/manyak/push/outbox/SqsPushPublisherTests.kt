@@ -31,7 +31,7 @@ class SqsPushPublisherTests {
         val response = CompletableFuture<SendMessageResponse>()
         `when`(client.sendMessage(request)).thenReturn(response)
 
-        val result = publisher.publish(message)
+        val result = publisher.publish(message, emptyMap())
 
         verify(client).sendMessage(request)
         assertThat(request.messageGroupId()).isNull()
@@ -45,25 +45,24 @@ class SqsPushPublisherTests {
     fun `SDK 비동기 실패는 예외 완료한다`() {
         val failure = IllegalStateException("SQS unavailable")
         `when`(client.sendMessage(request)).thenReturn(CompletableFuture.failedFuture(failure))
-        assertThatThrownBy { publisher.publish(message).join() }.hasCause(failure)
+        assertThatThrownBy { publisher.publish(message, emptyMap()).join() }.hasCause(failure)
     }
 
     @Test
     fun `SDK 호출 자체가 던진 예외도 예외 완료한다`() {
         val failure = IllegalStateException("client closed")
         `when`(client.sendMessage(request)).thenThrow(failure)
-        val result = publisher.publish(message)
+        val result = publisher.publish(message, emptyMap())
         assertThatThrownBy { result.join() }.hasCause(failure)
     }
 
     @Test
-    fun `현재 추적 컨텍스트를 traceparent 메시지 속성으로 싣는다`() {
-        val traced = SqsPushPublisher(client, mapper, queueUrl) { sink -> sink("traceparent", "00-trace-span-01") }
+    fun `릴레이가 정한 추적 헤더를 traceparent 메시지 속성으로 싣는다`() {
         val captor = ArgumentCaptor.forClass(SendMessageRequest::class.java)
         `when`(client.sendMessage(captor.capture()))
             .thenReturn(CompletableFuture.completedFuture(SendMessageResponse.builder().build()))
 
-        traced.publish(message).join()
+        publisher.publish(message, mapOf("traceparent" to "00-trace-span-01")).join()
 
         val attributes = captor.value.messageAttributes()
         assertThat(attributes["traceparent"]?.stringValue()).isEqualTo("00-trace-span-01")
@@ -72,9 +71,9 @@ class SqsPushPublisherTests {
     }
 
     @Test
-    fun `추적 컨텍스트가 없으면 메시지 속성을 붙이지 않는다`() {
+    fun `추적 헤더가 없으면 메시지 속성을 붙이지 않는다`() {
         `when`(client.sendMessage(request)).thenReturn(CompletableFuture.completedFuture(SendMessageResponse.builder().build()))
-        publisher.publish(message).join()
+        publisher.publish(message, emptyMap()).join()
         verify(client).sendMessage(request)
     }
 }

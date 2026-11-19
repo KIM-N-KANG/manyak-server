@@ -38,8 +38,8 @@ class AdminAnalyticsPersistenceIntegrationTests : IntegrationTest() {
     @Test fun `응답 값을 실제 테이블에 저장하고 겹치는 범위는 저장 날짜를 재사용한다`() {
         cleaner.cleanAll()
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                val url = r.requestUrl!!
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val url = request.requestUrl!!
                 val from = LocalDate.parse(url.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val to = LocalDate.parse(url.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val dates = from.datesUntil(to.plusDays(1)).toList().map { it.toString() }

@@ -32,7 +32,8 @@ class StorySearchIndexerTests {
         indexer.indexAll(listOf(1, 2))
         indexer.reindex()
         verifyNoInteractions(reader, admin, client)
-        assertNull(StorySearchConfig().openSearchClient(properties, null))
+        assertNull(StorySearchConfig().storySearchTransport(properties, null))
+        assertNull(StorySearchConfig().openSearchClient(null))
         assertNull(StorySearchConfig().storySearchHttpClient(properties))
     }
 

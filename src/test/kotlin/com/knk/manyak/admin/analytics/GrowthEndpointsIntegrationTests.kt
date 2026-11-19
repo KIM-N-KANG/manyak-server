@@ -40,8 +40,8 @@ class GrowthEndpointsIntegrationTests : IntegrationTest() {
     @Test fun `새 성장 API 다섯 개는 관리자 인증 계약 필드와 기간 검증을 적용한다`() {
         cleaner.cleanAll()
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                val u = r.requestUrl!!
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val u = request.requestUrl!!
                 val dates = AnalyticsRange(LocalDate.parse(u.queryParameter("start"), BASIC_ISO_DATE), LocalDate.parse(u.queryParameter("end"), BASIC_ISO_DATE)).dates()
                 val data: Any = when {
                     u.encodedPath.endsWith("/funnels") -> listOf(mapOf("cumulativeRaw" to List(u.queryParameterValues("e").size) { 10-it }))
@@ -85,7 +85,7 @@ class GrowthEndpointsIntegrationTests : IntegrationTest() {
             }
             for (bad in listOf("from=2026-10-20", "days=90", "days=7&from=2026-10-20&to=2026-10-21")) get("$path?$bad").expectStatus().isBadRequest
         }
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(500) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500) }
         for (path in routes) get("$path?from=2026-10-30&to=2026-10-30").expectStatus().isEqualTo(503).expectBody().jsonPath("$.code").isEqualTo("SERVICE_UNAVAILABLE")
     }
 }

@@ -43,7 +43,7 @@ class AdminPaymentMetricsRepository(private val jdbc: NamedParameterJdbcTemplate
         """, params(from, until, excluded)) { rs, _ -> AdminPaymentPeriodTotals(
         rs.getLong("paying_members"), rs.getLong("orders"), rs.getLong("amount_krw"),
         AdminPaymentTotals(rs.getLong("first_orders"), rs.getLong("first_amount")),
-        AdminPaymentTotals(rs.getLong("repeat_orders"), rs.getLong("repeat_amount")), rs.getLong("refunded_orders")) }!!
+        AdminPaymentTotals(rs.getLong("repeat_orders"), rs.getLong("repeat_amount")), rs.getLong("refunded_orders")) }
 
     fun products(from: Instant, until: Instant, excluded: List<Long>): List<AdminPaymentProductMetrics> = jdbc.query("""
         SELECT o.product_id,COUNT(*) AS orders,SUM(o.price_krw) AS amount_krw,SUM(o.credit_amount) AS credit_amount

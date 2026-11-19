@@ -17,6 +17,8 @@ import org.opensearch.client.opensearch._types.ErrorResponse
 import org.opensearch.client.opensearch.core.SearchRequest
 import com.knk.manyak.story.service.StoryAuthorResolver
 import com.knk.manyak.story.service.OfficialStoryAccount
+import com.knk.manyak.story.service.StoryService
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import com.knk.manyak.story.repository.StoryRepository
 import java.io.StringWriter
 import java.util.UUID
@@ -28,7 +30,7 @@ class StorySearchServiceTests {
         val service = StorySearchService(
             client, StorySearchProperties(), storyPlayReaderOver(Mockito.mock(StoryRepository::class.java)),
             Mockito.mock(StorySearchIndexer::class.java), Mockito.mock(OfficialStoryAccount::class.java),
-            Mockito.mock(StoryAuthorResolver::class.java),
+            Mockito.mock(StoryAuthorResolver::class.java), Mockito.mock(StoryService::class.java),
         )
         val requests = mutableListOf<SearchRequest>()
         Mockito.`when`(client.search(Mockito.any(SearchRequest::class.java), Mockito.eq(StorySearchDocument::class.java)))
@@ -59,34 +61,62 @@ class StorySearchServiceTests {
     }
 
     @Test
-    fun `없는 인덱스는 빈 페이지를 반환하고 다른 저장소 오류는 503이다`() {
+    fun `없는 인덱스와 저장소 오류는 커서 없는 요청이면 DB 대체 검색 한 페이지로, 커서 있는 요청이면 503으로 응답한다`() {
         val client = Mockito.mock(OpenSearchClient::class.java)
         val stories = Mockito.mock(StoryRepository::class.java)
         val indexer = Mockito.mock(StorySearchIndexer::class.java)
-        val officialAccount = Mockito.mock(OfficialStoryAccount::class.java)
-        val authors = Mockito.mock(StoryAuthorResolver::class.java)
-        val service = StorySearchService(client, StorySearchProperties(), storyPlayReaderOver(stories), indexer, officialAccount, authors)
+        val fallback = Mockito.mock(StoryService::class.java)
+        val meters = SimpleMeterRegistry()
+        val service = StorySearchService(
+            client, StorySearchProperties(), storyPlayReaderOver(stories), indexer,
+            Mockito.mock(OfficialStoryAccount::class.java), Mockito.mock(StoryAuthorResolver::class.java), fallback, meters,
+        )
+        // 기동 시 0으로 등록한다.
+        assertEquals(0.0, meters.counter("manyak.story.search.fallback").count())
+        val card = StorySearchDocument(publicId = UUID.randomUUID().toString(), title = "왕국").toSummary(isOriginal = false)
+        Mockito.`when`(fallback.searchListedByText("왕국", 20)).thenReturn(listOf(card))
         fun failure(type: String, status: Int) = OpenSearchException(
             ErrorResponse.Builder()
                 .status(status).error { it.type(type).reason("test") }.build(),
         )
-        Mockito.`when`(client.search(
-            Mockito.any(SearchRequest::class.java),
-            Mockito.eq(StorySearchDocument::class.java),
-        )).thenThrow(failure("index_not_found_exception", 404))
-        val page = service.search("왕국", 20, null)
-        assertTrue(page.items.isEmpty())
-        assertNull(page.nextCursor)
-        Mockito.verifyNoInteractions(stories, indexer, officialAccount, authors)
-        for (error in listOf(failure("security_exception", 403), failure("search_phase_execution_exception", 500), java.io.IOException("unavailable"))) {
+        val cursor = StorySearchCursor.fromSort(listOf(FieldValue.of(1.0), FieldValue.of(1L), FieldValue.of(UUID.randomUUID().toString()))).encode("왕국")
+        val errors = listOf(failure("index_not_found_exception", 404), failure("security_exception", 403),
+            failure("search_phase_execution_exception", 500), java.io.IOException("unavailable"))
+        for ((i, error) in errors.withIndex()) {
             Mockito.doThrow(error).`when`(client).search(
                 Mockito.any(SearchRequest::class.java),
                 Mockito.eq(StorySearchDocument::class.java),
             )
+            val page = service.search(" 왕국 ", 20, null)
+            assertEquals(listOf(card), page.items)
+            assertNull(page.nextCursor)
+            assertEquals(i + 1.0, meters.counter("manyak.story.search.fallback").count())
             assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException::class.java) {
-                service.search("왕국", 20, null)
+                service.search("왕국", 20, cursor)
             }.statusCode)
         }
+        assertEquals(errors.size.toDouble(), meters.counter("manyak.story.search.fallback").count())
+        Mockito.verifyNoInteractions(stories, indexer)
+    }
+
+    @Test
+    fun `응답 한도를 넘긴 질의는 기다리지 않고 DB 대체 검색으로 응답한다`() {
+        val client = Mockito.mock(OpenSearchClient::class.java)
+        val fallback = Mockito.mock(StoryService::class.java)
+        Mockito.`when`(fallback.searchListedByText("왕국", 20)).thenReturn(emptyList())
+        val service = StorySearchService(
+            client, StorySearchProperties(queryTimeout = java.time.Duration.ofMillis(200)),
+            storyPlayReaderOver(Mockito.mock(StoryRepository::class.java)), Mockito.mock(StorySearchIndexer::class.java),
+            Mockito.mock(OfficialStoryAccount::class.java), Mockito.mock(StoryAuthorResolver::class.java), fallback,
+        )
+        Mockito.`when`(client.search(Mockito.any(SearchRequest::class.java), Mockito.eq(StorySearchDocument::class.java)))
+            .thenAnswer { Thread.sleep(5_000); null }
+        val started = System.nanoTime()
+        val page = service.search("왕국", 20, null)
+        val elapsedMillis = (System.nanoTime() - started) / 1_000_000
+        assertTrue(page.items.isEmpty())
+        assertTrue(elapsedMillis < 2_000, "한도 200ms인데 ${elapsedMillis}ms 걸림")
+        Mockito.verify(fallback).searchListedByText("왕국", 20)
     }
 
     @Test
@@ -96,7 +126,7 @@ class StorySearchServiceTests {
             storyPlayReaderOver(Mockito.mock(StoryRepository::class.java)),
             Mockito.mock(StorySearchIndexer::class.java),
             Mockito.mock(OfficialStoryAccount::class.java),
-            Mockito.mock(StoryAuthorResolver::class.java),
+            Mockito.mock(StoryAuthorResolver::class.java), Mockito.mock(StoryService::class.java),
         )
         assertEquals(HttpStatus.SERVICE_UNAVAILABLE, assertThrows(ResponseStatusException::class.java) {
             service.search("왕국", 20, null)

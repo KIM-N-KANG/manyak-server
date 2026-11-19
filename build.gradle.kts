@@ -1,9 +1,9 @@
 plugins {
-    kotlin("jvm") version "2.2.21"
-    kotlin("plugin.spring") version "2.2.21"
+    kotlin("jvm") version "2.3.21"
+    kotlin("plugin.spring") version "2.3.21"
     id("org.springframework.boot") version "4.1.2"
     id("io.spring.dependency-management") version "1.1.7"
-    kotlin("plugin.jpa") version "2.2.21"
+    kotlin("plugin.jpa") version "2.3.21"
 }
 
 group = "com.knk"
@@ -12,7 +12,7 @@ description = "manyak-server"
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
@@ -157,4 +157,9 @@ tasks.withType<Test> {
 
 tasks.bootJar {
     archiveFileName.set("app.jar")
+    // Java 24부터 클래스패스 코드의 네이티브 호출(Netty의 System.loadLibrary)에 JEP 472 경고가 나온다.
+    // `java -jar`로 띄우는 실행 jar는 이 매니페스트 속성으로 플래그 없이 허용한다(ALL-UNNAMED만 가능). Java 21은 이 속성을 무시한다(KNK-2095).
+    manifest {
+        attributes("Enable-Native-Access" to "ALL-UNNAMED")
+    }
 }

@@ -116,7 +116,7 @@ class ChatQueryService(
             val showsCurrent = story?.currentMetadataVisible == true
             // 읽을 수 없으면 그 스토리가 **마지막으로 공개였던 시점**의 스냅샷에서 멈춘다(KNK-1065).
             val snapshot = if (showsCurrent) null else story?.let { snapshotByStoryId[it.id] }
-            val defaultName = if (showsCurrent) story?.protagonistName else snapshot?.protagonistName
+            val defaultName = if (showsCurrent) story.protagonistName else snapshot?.protagonistName
             val chatName = chat.personaNameSnapshot ?: defaultName
             ChatSummaryResponse(
                 persona = chat.personaNameSnapshot?.let(::ChatPersonaResponse),
@@ -237,7 +237,7 @@ class ChatQueryService(
         val showsCurrentStory = story?.currentMetadataVisible == true
         // 읽을 수 없으면 그 스토리가 마지막으로 공개였던 시점의 스냅샷에서 멈춘다(KNK-1065).
         val snapshot = if (showsCurrentStory) null else story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
-        val chatName = chat.personaNameSnapshot ?: if (showsCurrentStory) story?.protagonistName else snapshot?.protagonistName
+        val chatName = chat.personaNameSnapshot ?: if (showsCurrentStory) story.protagonistName else snapshot?.protagonistName
         val storyTitle = (if (showsCurrentStory) story.title else snapshot?.title).orEmpty()
         // prologue와 추천 입력 모두 시작 설정에 종속되므로 한 번만 조회해 재사용한다.
         val startSetting = chat.startSettingId?.let { storyPlayReader.findStartSetting(it) }
@@ -330,7 +330,7 @@ class ChatQueryService(
         val startSetting = chat.startSettingId?.let { storyPlayReader.findStartSetting(it) }
         val showsCurrentStory = story?.currentMetadataVisible == true
         val snapshot = if (showsCurrentStory) null else story?.let { storyPublicSnapshotService.findByStoryId(it.id) }
-        val chatName = chat.personaNameSnapshot ?: if (showsCurrentStory) story?.protagonistName else snapshot?.protagonistName
+        val chatName = chat.personaNameSnapshot ?: if (showsCurrentStory) story.protagonistName else snapshot?.protagonistName
 
         // 커트라인 이하 턴만 싣는다. 발급 이후 진행분은 제외되고, 커트라인 이내 턴의 재생성 결과(활성본)는 반영된다.
         val turns = loadSharedTurns(chat.id, share.turnCutoff)

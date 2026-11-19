@@ -28,9 +28,9 @@ class AmplitudeBudgetTests {
             server.start(); val mapper = ObjectMapper(); val clock = MutableAnalyticsClock(now)
             val fixture = AnalyticsTestFixture(AmplitudeDashboardProperties("mock", "mock", "team", server.url("/").toString()), clock)
             val today = LocalDate.parse("2026-10-22"); val to = if (includesToday) today else today.minusDays(1); val from = to.minusDays(119)
-            server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
-                val start = LocalDate.parse(r.requestUrl!!.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
-                val end = LocalDate.parse(r.requestUrl!!.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+            server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse {
+                val start = LocalDate.parse(request.requestUrl!!.queryParameter("start"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+                val end = LocalDate.parse(request.requestUrl!!.queryParameter("end"), java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
                 val dates = start.datesUntil(end.plusDays(1)).toList()
                 return MockResponse().setBody(mapper.writeValueAsString(mapOf("data" to mapOf("xValues" to dates.map { it.toString() }, "series" to listOf(List(dates.size) { 1 })))))
             } }

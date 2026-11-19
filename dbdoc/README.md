@@ -49,7 +49,7 @@
 | [public.groble_refund_marks](public.groble_refund_marks.md) | 3 |  | BASE TABLE |
 | [public.user_consents](public.user_consents.md) | 4 |  | BASE TABLE |
 | [public.guest_consents](public.guest_consents.md) | 4 |  | BASE TABLE |
-| [public.push_outbox](public.push_outbox.md) | 8 |  | BASE TABLE |
+| [public.push_outbox](public.push_outbox.md) | 10 |  | BASE TABLE |
 | [public.story_submissions](public.story_submissions.md) | 21 | 일반 제작 등록·수정 검수 제출본. 승인 전 라이브와 분리 | BASE TABLE |
 | [public.story_creation_tag_aliases](public.story_creation_tag_aliases.md) | 4 |  | BASE TABLE |
 | [public.user_personas](public.user_personas.md) | 8 |  | BASE TABLE |
@@ -640,6 +640,8 @@ erDiagram
   timestamp_with_time_zone next_attempt_at
   timestamp_with_time_zone created_at
   timestamp_with_time_zone published_at
+  varchar_55_ trace_parent
+  varchar_512_ trace_state
 }
 "public.story_submissions" {
   bigint id

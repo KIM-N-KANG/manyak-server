@@ -245,7 +245,7 @@ class StoryCreationRequestRecorder(
                 isIncompatibleReplayFallback = true,
                 parentLink = row.parentCreationLink(),
             )
-        } ?: error("Story creation request incompatible replay claim transaction result is empty")
+        }
 
     /**
      * 신규 요청은 PENDING 행을 기록해 실행하도록, 재요청은 상태에 따라 replay·409·재실행으로 분기한다.
@@ -325,7 +325,7 @@ class StoryCreationRequestRecorder(
             val claim = resolveExisting(row, stage, ownerUserId, ownerDeviceIdHash)
             if (claim is Claim.Run && draftId != null && ownerUserId != null) drafts.deleteOwned(draftId, ownerUserId)
             claim
-        } ?: error("Story creation request claim transaction result is empty")
+        }
 
     private fun resolveExisting(row: StoryCreationRequest, stage: StoryCreationStage, ownerUserId: Long?, ownerDeviceIdHash: String?): Claim {
         if (!row.isOwnedBy(ownerUserId, ownerDeviceIdHash)) {

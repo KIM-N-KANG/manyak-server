@@ -114,7 +114,7 @@ class ChatTurnAssembler(
         val material = if (showsCurrentStory) {
             // 이 채팅이 고른 시작 설정 하나만 읽는다(PR #224 Codex P2). 전체 캡처는 스토리의 모든 시작 설정과
             // 각 추천 입력·엔딩 본문을 뜨는데, 턴 조립은 매 턴 도는 경로이고 시작 설정 개수에 상한이 없다.
-            story?.let { storyPublicSnapshotService.captureTurnMaterial(it.id, chat.startSettingId) }
+            story.let { storyPublicSnapshotService.captureTurnMaterial(it.id, chat.startSettingId) }
         } else {
             // 스냅샷이 NULL이면(한 번도 공개된 적 없거나 V69 백필 대상 밖) 재료가 통째로 빈다. 현재 값으로
             // 되돌리지 않는다 — 그 폴백은 막으려는 유출을 정확히 그 케이스에서 되살리고, AI에는 대화 내역이
@@ -199,7 +199,7 @@ class ChatTurnAssembler(
             judgmentSource = TurnJudgmentSource(endings = endings, mainEvents = mainEvents, endingNames = endingNames, eventNames = eventNames),
             protagonistName = chatName,
         )
-    } ?: error("AI 턴 요청 조립이 결과 없이 끝났습니다: chatId=${chat.id}")
+    }
 
     /**
      * 채팅이 거쳐온(완결) 사건 이름을 주요 사건 표시 순서로 반환한다(occurred_main_event_names 재료).

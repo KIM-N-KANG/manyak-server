@@ -22,9 +22,9 @@ class CampaignAnalyticsTests {
         fixture = AnalyticsTestFixture(AmplitudeDashboardProperties("mock", "mock", dashboardBaseUrl = server.url("/").toString()), MutableAnalyticsClock(now))
         service = CampaignAnalyticsService(settings, fixture.snapshots, AnalyticsQueryFactory(fixture.mapper), fixture.clock)
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                requests += r
-                val url = r.requestUrl!!; val events = url.queryParameterValues("e").map { fixture.mapper.readTree(it!!) }
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                val url = request.requestUrl!!; val events = url.queryParameterValues("e").map { fixture.mapper.readTree(it!!) }
                 if (url.encodedPath.endsWith("/funnels")) {
                     val ads = events[0]["filters"].toList().any { it["subprop_key"].asText() == "gp:initial_utm_campaign" }
                     return MockResponse().setBody(fixture.mapper.writeValueAsString(mapOf("data" to listOf(mapOf("cumulativeRaw" to List(events.size) { (if (ads) 80 else 100) - it * 10 })))))
@@ -126,9 +126,9 @@ class CampaignAnalyticsTests {
     }
     @Test fun `Android 가입은 광고 구분 없이 따로 세고 Web 가입에 섞지 않는다`() {
         val delegate = server.dispatcher
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
-            val e = fixture.mapper.readTree(r.requestUrl!!.queryParameter("e")!!)
-            if (!e.toString().contains(AdminMetricEvents.SIGNUP)) return delegate.dispatch(r)
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse {
+            val e = fixture.mapper.readTree(request.requestUrl!!.queryParameter("e")!!)
+            if (!e.toString().contains(AdminMetricEvents.SIGNUP)) return delegate.dispatch(request)
             val filters = e["filters"].toString()
             val value = when { filters.contains("Android") -> 7; filters.contains("initial_utm_campaign") -> 3; else -> 4 }
             return MockResponse().setBody("{\"data\":{\"xValues\":[\"2026-10-22\",\"2026-10-23\"],\"series\":[[$value,$value]]}}")
@@ -149,7 +149,7 @@ class CampaignAnalyticsTests {
     }
     @Test fun `추이 7일 갱신의 3번째 조회가 실패하면 성공한 2회 비용 14만 남는다`() {
         val delegate = server.dispatcher; var count = 0
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse = if (++count == 3) MockResponse().setResponseCode(500) else delegate.dispatch(r) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse = if (++count == 3) MockResponse().setResponseCode(500) else delegate.dispatch(request) }
         assertThatThrownBy { service.analytics(query(7)) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)
         assertThat(fixture.budget.reserve(486)).isTrue(); assertThat(fixture.budget.reserve(1)).isFalse()
     }
@@ -157,7 +157,7 @@ class CampaignAnalyticsTests {
         assertThat(fixture.budget.reserve(380)).isTrue()
         // 먼저 예약한 쪽의 호출을 붙잡아 두어 다른 쪽이 반드시 그 예약 뒤의 잔액으로 계획하게 한다.
         val gate = java.util.concurrent.CountDownLatch(1); val delegate = server.dispatcher
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse { gate.await(5, java.util.concurrent.TimeUnit.SECONDS); return delegate.dispatch(r) } }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse { gate.await(5, java.util.concurrent.TimeUnit.SECONDS); return delegate.dispatch(request) } }
         val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
         try {
             val futures = listOf("A", "B").map { campaign -> pool.submit<Boolean> { runCatching { service.analytics(query(7).apply { this.campaign = campaign }) }.isSuccess } }
@@ -172,9 +172,9 @@ class CampaignAnalyticsTests {
     }
     @Test fun `16개 중 5번째가 실패하면 앞 4개만 저장하고 쿨다운 후 빠진 12개만 채운다`() {
         val delegate = server.dispatcher; var count = 0
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest): MockResponse {
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse {
             if (++count == 5) return MockResponse().setResponseCode(500)
-            return delegate.dispatch(r)
+            return delegate.dispatch(request)
         } }
         val q = query(1)
         assertThatThrownBy { service.analytics(q) }.isInstanceOf(AdminAnalyticsUnavailable::class.java)

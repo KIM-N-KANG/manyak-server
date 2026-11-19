@@ -40,7 +40,9 @@ class ChatImageAiCallRecorder(private val repository: AiCallLogRepository, trans
     fun imageReceived(call: Call?, url: String, issuedUrl: String?) {
         if (call == null || url != issuedUrl) return
         val start = call.started.get() ?: return
-        call.latency.compareAndSet(null, Duration.between(start, clock.instant()).toMillis().coerceAtLeast(0))
+        val latency = Duration.between(start, clock.instant()).toMillis().coerceAtLeast(0)
+        // 첫 수신만 기록한다. 박싱된 Long의 동일성 비교(compareAndSet) 대신 비어 있을 때만 채운다.
+        call.latency.updateAndGet { it ?: latency }
     }
     fun finish(call: Call?, turnNumber: Int? = null, errorCode: String? = null) {
         if (call == null || !call.finished.compareAndSet(false, true)) return

@@ -73,7 +73,7 @@ class ChatRealtimeImageService(
             logger.warn("실시간 이미지 객체 확인 실패: {}", ex.javaClass.simpleName)
             false
         }
-        fun invalid(url: String): Boolean = isRealtimeUrl(url) && !(accepted && url == slot?.publicUrl)
+        fun invalid(url: String): Boolean = isRealtimeUrl(url) && !(accepted && url == slot.publicUrl)
         return Validated(
             result.copy(
                 aiOutput = markers.replace(result.aiOutput) { match ->

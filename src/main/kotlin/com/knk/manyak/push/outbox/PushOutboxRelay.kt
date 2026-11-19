@@ -25,6 +25,7 @@ class PushOutboxRelay(
     meters: MeterRegistry,
     private val clock: Clock = Clock.systemUTC(),
     private val observationRegistry: ObservationRegistry = ObservationRegistry.NOOP,
+    private val traceHeaders: TraceHeaders = TraceHeaders.NONE,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val counters = listOf("published", "retry", "abandoned").associateWith {
@@ -50,7 +51,7 @@ class PushOutboxRelay(
                 false // 기록에 실패해도 만료된 요청을 발행하지 않고 임대 후 복구한다.
             }
         }
-        val pending = publishable.map { row -> row to publishObserved(row.message) }
+        val pending = publishable.map { row -> row to publishObserved(row) }
         try {
             CompletableFuture.allOf(*pending.map { it.second }.toTypedArray())
                 .get(settings.sendTimeout.toMillis(), TimeUnit.MILLISECONDS)
@@ -75,11 +76,17 @@ class PushOutboxRelay(
         }
     }
 
-    /** 발행 단위로만 관측한다. 헤더 주입은 현재 스코프에서, 종료는 비동기 브로커 응답 뒤에 한다. */
-    private fun publishObserved(message: PushMessage): CompletableFuture<Unit> {
-        val observation = Observation.createNotStarted("push.outbox.publish", observationRegistry).start()
+    /**
+     * 발행 단위로만 관측한다. 종료는 비동기 브로커 응답 뒤에 한다.
+     * 행에 저장된 기록 스팬의 추적 헤더가 있으면 그대로 싣고, 없으면 이 관측의 릴레이 스팬 헤더를 싣는다(NOTIFICATION 5-4-6).
+     */
+    private fun publishObserved(row: PushOutboxRow): CompletableFuture<Unit> {
+        val observation = Observation.createNotStarted("push.outbox.publish", { PushOutboxPublishContext(row.trace) }, observationRegistry).start()
         val future = try {
-            observation.openScope().use { publisher.publish(message) }
+            observation.openScope().use {
+                val headers = row.trace?.asMap() ?: buildMap { traceHeaders.inject { name, value -> put(name, value) } }
+                publisher.publish(row.message, headers)
+            }
         } catch (ex: Exception) {
             CompletableFuture.failedFuture<Unit>(ex)
         }

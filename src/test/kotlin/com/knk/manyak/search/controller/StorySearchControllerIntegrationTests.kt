@@ -320,20 +320,78 @@ class StorySearchControllerIntegrationTests : MockedBoundaryIntegrationTest() {
         .build()
 
     @Test
-    fun `인덱스가 아직 없으면 인증 없이 빈 검색 페이지를 반환한다`() {
+    fun `인덱스가 없으면 빈 목록 대신 DB 대체 검색으로 노출 조건을 만족하는 스토리를 최신순으로 반환한다`() {
         val error = org.opensearch.client.opensearch._types.OpenSearchException(
             org.opensearch.client.opensearch._types.ErrorResponse.Builder().status(404)
                 .error { it.type("index_not_found_exception").reason("test") }.build(),
         )
         `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java))).thenThrow(error)
+        val user = users.save(User(nickname = "대체작가", status = UserStatus.ACTIVE))
+        val base = Instant.parse("2026-11-01T00:00:00Z")
+        val older = stories.save(Story(userId = user.id, title = "오래된 왕국", createdAt = base))
+        val newer = stories.save(Story(userId = user.id, title = "새 이야기", oneLineIntro = "작은 왕국의 하루", createdAt = base.plusSeconds(60)))
+        val byGenre = stories.save(Story(userId = user.id, title = "장르만", genre = "왕국물", createdAt = base.plusSeconds(30)))
+        val guest = stories.save(Story(title = "게스트 왕국", createdAt = base.plusSeconds(10)))
+        stories.save(Story(userId = user.id, title = "비공개 왕국", visibility = StoryVisibility.PRIVATE, createdAt = base.plusSeconds(90)))
+        stories.save(Story(userId = user.id, title = "초안 왕국", status = StoryStatus.DRAFT, visibility = StoryVisibility.PRIVATE, createdAt = base.plusSeconds(91)))
+        stories.save(Story(userId = user.id, title = "삭제 왕국", createdAt = base.plusSeconds(92)).apply { deletedAt = base })
+        stories.save(Story(userId = user.id, title = "무관한 제목", createdAt = base.plusSeconds(93)))
+        client.get().uri("/api/v1/stories/search?q=왕국&limit=3").exchange().expectStatus().isOk
+            .expectBody()
+            .jsonPath("$.items[*].id").isEqualTo(listOf(newer, byGenre, guest).map { it.publicId.toString() })
+            .jsonPath("$.items[0].author.nickname").isEqualTo("대체작가")
+            .jsonPath("$.items[2].author").isEmpty
+            .jsonPath("$.nextCursor").isEmpty
         client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isOk
-            .expectBody().jsonPath("$.items").isEmpty.jsonPath("$.nextCursor").isEmpty
+            .expectBody().jsonPath("$.items.length()").isEqualTo(4)
+            .jsonPath("$.items[3].id").isEqualTo(older.publicId.toString())
     }
 
     @Test
-    fun `색인 실패는 검색 503으로 응답한다`() {
+    fun `저장소 장애 중 커서 없는 요청은 대체 검색이고 커서 있는 요청은 503이다`() {
         `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java))).thenThrow(java.io.IOException("unavailable"))
-        client.get().uri("/api/v1/stories/search?q=왕국").exchange().expectStatus().isEqualTo(503)
+        val user = users.save(User(nickname = "장애작가", status = UserStatus.ACTIVE))
+        val story = stories.save(Story(userId = user.id, title = "100% 진짜_왕국"))
+        stories.save(Story(userId = user.id, title = "1000 진짜X왕국"))
+        val latin = stories.save(Story(userId = user.id, title = "BL Kingdom"))
+        fun search(q: String) = client.get().uri { it.path("/api/v1/stories/search").queryParam("q", q).build() }.exchange()
+        // %와 _는 와일드카드가 아니라 문자 그대로 비교한다. 대소문자는 구분하지 않는다.
+        search("0% 진짜_").expectStatus().isOk
+            .expectBody().jsonPath("$.items[*].id").isEqualTo(listOf(story.publicId.toString())).jsonPath("$.nextCursor").isEmpty
+        search("bl kINGDOM").expectStatus().isOk
+            .expectBody().jsonPath("$.items[*].id").isEqualTo(listOf(latin.publicId.toString()))
+        val cursor = StorySearchCursor.fromSort(listOf(FieldValue.of(1.0), FieldValue.of(1L), FieldValue.of(UUID.randomUUID().toString()))).encode("왕국")
+        client.get().uri("/api/v1/stories/search?q=왕국&cursor=$cursor").exchange().expectStatus().isEqualTo(503)
+    }
+
+    @Test
+    fun `저장소 장애 중 커서 요청의 503은 Sentry에 보내지 않고 ERROR 없이 DEBUG 한 줄만 남긴다`() {
+        `when`(openSearch.search(any(SearchRequest::class.java), eq(StorySearchDocument::class.java))).thenThrow(java.io.IOException("unavailable"))
+        val cursor = StorySearchCursor.fromSort(listOf(FieldValue.of(1.0), FieldValue.of(1L), FieldValue.of(UUID.randomUUID().toString()))).encode("왕국")
+        val captured = java.util.concurrent.CopyOnWriteArrayList<io.sentry.SentryEvent>()
+        io.sentry.Sentry.init { options ->
+            options.dsn = "http://test@localhost/1"
+            options.beforeSend = io.sentry.SentryOptions.BeforeSendCallback { event, _ -> captured.add(event); null }
+        }
+        val logger = org.slf4j.LoggerFactory.getLogger(com.knk.manyak.global.error.GlobalExceptionHandler::class.java) as ch.qos.logback.classic.Logger
+        val appender = ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>().apply { start() }
+        val level = logger.level
+        logger.level = ch.qos.logback.classic.Level.DEBUG
+        logger.addAppender(appender)
+        try {
+            // 응답 상태, code, 문구는 그대로다(STORY 4-2-3).
+            client.get().uri("/api/v1/stories/search?q=왕국&cursor=$cursor").exchange().expectStatus().isEqualTo(503)
+                .expectBody().jsonPath("$.code").isEqualTo("SERVICE_UNAVAILABLE")
+                .jsonPath("$.message").isEqualTo("검색을 일시적으로 사용할 수 없습니다.")
+        } finally {
+            logger.detachAppender(appender)
+            logger.level = level
+            io.sentry.Sentry.close()
+        }
+        assertTrue(captured.isEmpty(), "Sentry 이벤트: ${captured.map { it.getTag("endpoint") }}")
+        val line = appender.list.single()
+        assertEquals(ch.qos.logback.classic.Level.DEBUG, line.level)
+        assertNull(line.throwableProxy)
     }
 
     @Test
@@ -460,7 +518,7 @@ class StorySearchControllerIntegrationTests : MockedBoundaryIntegrationTest() {
             .jsonPath("$.tags[?(@.name == 'Stories')].description").isEqualTo(listOf("스토리 API"))
             .jsonPath("$get.operationId").isEqualTo("searchStories")
             .jsonPath("$get.summary").isEqualTo("공개 스토리 검색")
-            .jsonPath("$get.description").isEqualTo("검색어는 trim 후 2~100자이며 관련도순으로 반환합니다. 다음 페이지는 같은 q와 nextCursor를 사용합니다.")
+            .jsonPath("$get.description").isEqualTo("검색어는 trim 후 2~100자이며 관련도순으로 반환합니다. 다음 페이지는 같은 q와 nextCursor를 사용합니다. 검색 저장소 장애 중 커서 없는 요청은 DB 부분 일치 최신순 한 페이지를 nextCursor 없이 반환합니다.")
             .jsonPath("$get.parameters.length()").isEqualTo(3)
             .jsonPath("$get.parameters[0].name").isEqualTo("q")
             .jsonPath("$get.parameters[0].in").isEqualTo("query")
@@ -478,7 +536,7 @@ class StorySearchControllerIntegrationTests : MockedBoundaryIntegrationTest() {
             .jsonPath("$get.responses['200'].content['*/*'].schema['\$ref']").isEqualTo("#/components/schemas/StoryPageResponse")
             .jsonPath("$get.responses['400'].description").isEqualTo("검색어·커서 형식 오류")
             .jsonPath("$get.responses['400'].content").doesNotExist()
-            .jsonPath("$get.responses['503'].description").isEqualTo("검색 미설정 또는 일시적 장애")
+            .jsonPath("$get.responses['503'].description").isEqualTo("검색 미설정 또는 저장소 장애 중 커서 요청")
             .jsonPath("$get.responses['503'].content").doesNotExist()
     }
 

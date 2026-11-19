@@ -29,9 +29,9 @@ class MetricExtensionsTests {
         definitions = MetricDefinitions(queries, fixture.mapper)
         service = AdminMetricsService(definitions, fixture.snapshots, queries, reads, AdminDashboardProperties(), fixture.clock)
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                requests += r
-                val u = r.requestUrl!!
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests += request
+                val u = request.requestUrl!!
                 val dates = AnalyticsRange(LocalDate.parse(u.queryParameter("start"), BASIC_ISO_DATE), LocalDate.parse(u.queryParameter("end"), BASIC_ISO_DATE)).dates()
                 val data: Any = when {
                     u.encodedPath.endsWith("/sessions/length") -> mapOf("xValues" to listOf("0s-3s", "3s-10s"), "series" to listOf(listOf(2, 3)))
@@ -95,7 +95,7 @@ class MetricExtensionsTests {
     }
     @Test fun `신규 방문자 조회 하나가 실패하면 가입 관련 세 필드가 함께 준비 중이다`() {
         definitions.signupPlatforms().forEach { m -> fixture.store.saveDaily(m.definition, mapOf(day to AnalyticsValue(fixture.mapper.valueToTree(11), fixture.clock.instant()))) }
-        server.dispatcher = object : Dispatcher() { override fun dispatch(r: RecordedRequest) = MockResponse().setResponseCode(500) }
+        server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(500) }
         val response = AdminMetricReadService(reads, AdminDashboardProperties(), definitions, fixture.snapshots, fixture.clock).signups(AdminChartsRequest().apply { from = day.toString(); to = day.toString() })
         assertThat(response.pendingDates).containsExactly(day)
         val row = response.daily.single()

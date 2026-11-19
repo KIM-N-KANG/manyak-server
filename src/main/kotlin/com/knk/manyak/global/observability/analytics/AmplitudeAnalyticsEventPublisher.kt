@@ -21,7 +21,7 @@ import java.time.Clock
 class AmplitudeAnalyticsEventPublisher(
     @param:Value("\${manyak.analytics.amplitude.enabled:false}") private val enabled: Boolean,
     @param:Value("\${manyak.analytics.amplitude.api-key:}") private val apiKey: String,
-    @param:Value("\${manyak.analytics.amplitude.base-url:https://api2.amplitude.com}") baseUrl: String,
+    @Value("\${manyak.analytics.amplitude.base-url:https://api2.amplitude.com}") baseUrl: String,
     private val clock: Clock = Clock.systemUTC(),
 ) : AnalyticsEventPublisher {
 

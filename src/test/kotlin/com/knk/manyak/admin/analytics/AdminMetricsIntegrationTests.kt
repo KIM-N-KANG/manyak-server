@@ -124,8 +124,8 @@ class AdminMetricsIntegrationTests : IntegrationTest() {
         val admin=users.save(User(nickname="관리자")); jdbc.update("INSERT INTO admin_accounts(user_id,granted_at) VALUES (?,CURRENT_TIMESTAMP)",admin.id)
         val token=jwt.issueAdminToken(admin.publicId)
         server.dispatcher=object : Dispatcher() {
-            override fun dispatch(r: RecordedRequest): MockResponse {
-                val u=r.requestUrl!!; val format=java.time.format.DateTimeFormatter.BASIC_ISO_DATE
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val u=request.requestUrl!!; val format=java.time.format.DateTimeFormatter.BASIC_ISO_DATE
                 val from=LocalDate.parse(u.queryParameter("start"),format); val to=LocalDate.parse(u.queryParameter("end"),format)
                 val dates=from.datesUntil(to.plusDays(1)).toList()
                 val data: Any=when {

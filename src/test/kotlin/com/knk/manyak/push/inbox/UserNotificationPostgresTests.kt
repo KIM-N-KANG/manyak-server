@@ -34,6 +34,7 @@ class UserNotificationPostgresTests {
             INSERT INTO push_campaigns(id, notice_id) VALUES (1, 1), (2, NULL)""")
         jdbc.execute(File("src/main/resources/db/migration/V111__create_user_notifications.sql").readText())
         jdbc.execute(File("src/main/resources/db/migration/V86__create_push_outbox.sql").readText())
+        jdbc.execute(File("src/main/resources/db/migration/V128__push_outbox_trace_context.sql").readText())
         jdbc.execute(File("src/main/resources/db/migration/V114__credit_expiry_notification_type.sql").readText())
         store = UserNotificationStore(jdbc)
     }
