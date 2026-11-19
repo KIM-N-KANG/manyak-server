@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [dev, main]
   push:
-    branches: [dev, chore/KNK-2111-security-scan] # 임시: 첫 전체 분석용. 다음 커밋에서 뺀다
+    branches: [dev]
   schedule:
     - cron: "17 18 * * 0" # 매주 월요일 03:17 KST
 
