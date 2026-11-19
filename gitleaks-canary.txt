@@ -1,0 +1,2 @@
+# KNK-2111 gitleaks 잡 시험용 가짜 값. 실제 키가 아니다. 이 PR은 닫고 브랜치를 지운다.
+aws_access_key_id = AKIAQ7XK2MZP4LWT6RVN
