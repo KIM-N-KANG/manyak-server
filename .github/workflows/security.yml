@@ -47,8 +47,8 @@ jobs:
             && git cat-file -e "$PUSH_BEFORE^{commit}" 2>/dev/null; then
             RANGE="$PUSH_BEFORE..$PUSH_AFTER"
           else
-            # 새 브랜치이거나 이전 커밋을 찾을 수 없으면(강제 push) push된 마지막 커밋만 본다.
-            RANGE="-1 $PUSH_AFTER"
+            # 새 브랜치이거나 이전 커밋을 찾을 수 없으면(강제 push) 함께 push된 커밋을 가릴 수 없어 그 커밋에서 닿는 히스토리 전체를 본다.
+            RANGE="$PUSH_AFTER"
           fi
           echo "검사 범위: $RANGE"
           # --redact: 찾은 값은 로그에 남기지 않는다. 찾으면 종료 코드 1로 잡이 실패한다.
