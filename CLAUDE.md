@@ -81,17 +81,17 @@
 
 ### 배포·릴리스
 
-- **main push만 프로덕션 배포를 트리거**합니다(`.github/workflows/docker-image.yml`). 흐름은 빌드가 ECR에 `:short-sha` push → 배포 잡이 최신 SHA 게이트 뒤에서 `:latest` 승격 → ECS `manyak-prod` 서비스에 `force-new-deployment` → 배포 id 폴링·컨테이너 헬스·`api.manyak.app` 스모크입니다. dev 머지는 프로덕션에 반영되지 않습니다.
+- **main push만 프로덕션 배포를 트리거**합니다(`.github/workflows/docker-image.yml`). 흐름은 빌드가 ECR에 `:short-sha` push → 배포 잡이 최신 SHA 게이트 뒤에서 운영 앱 호스트의 SSM 문서(`manyak-prod-host-deploy-server`)로 그 불변 태그를 배포(호스트 `deploy.sh`가 새 컨테이너 헬스 → kamal-proxy 전환 → 옛 컨테이너 드레인) → `api.manyak.app` 스모크(실패하면 `image=rollback`) → `:latest` 승격입니다(KNK-2106). dev 머지는 프로덕션에 반영되지 않습니다.
 - **dev push는 dev 앱 호스트(EC2 한 대, KNK-2102)에 배포**합니다. 흐름은 빌드가 GHCR에 `:short-sha` push → 배포 잡이 최신 SHA 게이트 뒤에서 `:dev` 승격 → SSM 문서 `manyak-dev-host-deploy-server`로 그 커밋 이미지를 배포(호스트 `deploy.sh`: 새 컨테이너 헬스 → kamal-proxy 전환 → 옛 컨테이너 드레인 후 정지, 무중단) → `dev-api.manyak.app` 스모크입니다. 실패하면 새 컨테이너만 지워지고 옛 server가 계속 서비스합니다. dev 컨테이너 설정(환경 변수·시크릿)은 manyak-terraform `modules/app-host`가 관리합니다. 되돌리기는 SSM 문서를 `image=rollback`으로 실행합니다.
 - **운영 EC2는 회수됐습니다**(KNK-971). EC2+SSM 배포·롤백 경로는 더 이상 없습니다. 배포 실패 시 워크플로가 `:latest`를 이전 digest로 되돌리고 재배포를 트리거하며, 그 외 롤백은 revert 커밋 릴리스 또는 ECR 이전 `:short-sha`를 `:latest`로 수동 재태깅 후 `force-new-deployment`입니다.
 - 머지 규칙: 기능→dev = Squash, `release/vX.Y.Z`→main = **Merge Commit**, release→dev = Rebase 역반영. main/dev 직접 push 금지(관례).
 - 릴리스 절차: dev에서 `release/vX.Y.Z` 분기 → PR 제목 `[KNK-xxx] Release: vX.Y.Z 배포` → 머지 후 `vX.Y.Z` git 태그. `build.gradle.kts` version은 올리지 않습니다(이미지 태그는 git sha 기반).
 - 릴리스 PR 본문과 릴리스 티켓에는 포함 PR 목록과 별도로 **"코드 외 할 일"** 칸을 둡니다. 설정 켜기, `terraform apply`처럼 이미지 배포만으로 끝나지 않는 작업과 다음 릴리스에 묶기로 한 설정 변경을 적고, 없으면 "없음"이라고 적습니다. 이 칸의 항목이 모두 끝나야 릴리스 티켓을 완료합니다.
-- 기능 설정을 켜거나 끄는 배포는 배포 확인 때 **실행 태스크 정의의 해당 환경 변수가 의도한 값인지 대조**합니다(`aws ecs describe-task-definition`으로 `server` 컨테이너의 `environment` 조회). 헬스 200만으로 판정하지 않습니다.
+- 기능 설정을 켜거나 끄는 배포는 배포 확인 때 **실행 중인 server 컨테이너의 해당 환경 변수가 의도한 값인지 대조**합니다(호스트의 `/opt/manyak/config/services/server.env`, 또는 SSM으로 `docker inspect`. 값은 출력하지 않고 키·비밀 아닌 값만 봅니다). 헬스 200만으로 판정하지 않습니다.
 - 와이어 계약(요청/응답 필드)이 바뀌는 릴리스는 manyak-web·manyak-ai와 **동반 배포**가 필요한지 확인합니다. 반쪽 배포는 런타임 장애로 이어집니다.
 - 비밀값이 대화·PR에 평문 노출되면 값을 재출력하지 말고 노출 사실을 짚고 재발급을 권합니다. Secrets Manager `put-secret-value`는 전체 덮어쓰기이므로 기존 키를 보존해 머지(jq)합니다.
 
 ### Terraform/IaC 작업
 
 - 운영 인프라(Terraform/IaC)는 `manyak-terraform` 레포로 분리됨(KNK-296). 이 레포에는 IaC 코드를 두지 않으며, terraform 작업·제약·apply는 그 레포의 `CLAUDE.md`를 따릅니다.
-- 이 레포에서 알아야 할 최소한: **인프라 정의 변경은 앱 레포 배포 잡으로 반영되지 않고 terraform apply가 필요**합니다. ECS 태스크 정의(컨테이너·환경변수·헬스체크)가 terraform 관리이고 CI 역할에는 `RegisterTaskDefinition` 권한이 없어, 배포 잡은 기존 정의로 이미지를 다시 pull할 뿐입니다. 롤백용 EC2의 운영 compose도 terraform user-data로 구워져 apply(=인스턴스 교체, 짧은 다운타임)가 필요하고, 교체 인스턴스는 `:latest`로 부팅하므로 **apply는 반드시 해당 코드의 main 릴리스 후에** 합니다.
+- 이 레포에서 알아야 할 최소한: **인프라 정의 변경은 앱 레포 배포 잡으로 반영되지 않고 terraform apply가 필요**합니다. 컨테이너 환경변수·시크릿 참조·헬스체크는 terraform이 호스트 설정(S3)으로 내려보내고, 배포 잡은 이미지 태그만 바꿉니다. 설정을 바꾼 apply는 다음 배포 때(또는 SSM 문서 `image=current`로 다시 배포할 때) 반영되므로 **apply는 반드시 해당 코드의 main 릴리스 후에** 합니다.
