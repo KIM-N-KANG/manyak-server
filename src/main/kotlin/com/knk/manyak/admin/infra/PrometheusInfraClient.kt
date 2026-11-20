@@ -73,7 +73,8 @@ class PrometheusInfraClient(private val properties: InfraMetricsProperties, priv
         }.build()
 
     private fun result(future: CompletableFuture<HttpResponse<String>>, deadline: Long): List<JsonNode> {
-        val response = try { future.get(remaining(deadline, SERVICE).toNanos(), TimeUnit.NANOSECONDS) }
+        // 앞 질의를 기다리는 동안 끝난 질의는 한도가 지났어도 결과를 받는다(get(0)은 완료된 값을 바로 돌려줌).
+        val response = try { future.get((deadline - System.nanoTime()).coerceAtLeast(0), TimeUnit.NANOSECONDS) }
         catch (_: TimeoutException) { throw InfraFetchFailure("timeout", SERVICE) }
         catch (failure: ExecutionException) { throw InfraFetchFailure(if (failure.cause is HttpTimeoutException) "timeout" else "prometheus_error", SERVICE) }
         catch (_: InterruptedException) { Thread.currentThread().interrupt(); throw InfraFetchFailure("timeout", SERVICE) }
