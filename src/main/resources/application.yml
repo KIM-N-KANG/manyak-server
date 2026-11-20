@@ -116,13 +116,17 @@ manyak:
       medium-range-days: 7
       fine-retention-days: 63
       database-max-limit: 100
-      cluster: ${MANYAK_ADMIN_INFRA_ECS_CLUSTER:}
-      services: ${MANYAK_ADMIN_INFRA_ECS_SERVICES:}
-      load-balancer: ${MANYAK_ADMIN_INFRA_ALB:}
+      # ADMIN 6-3. 비어 있는 출처는 부르지 않고 그 묶음을 null로 둔다(개발 서버는 Redis 묶음만 응답).
+      host-asg: ${MANYAK_ADMIN_INFRA_HOST_ASG:}
       database: ${MANYAK_ADMIN_INFRA_RDS_INSTANCE:}
-      cache-clusters: ${MANYAK_ADMIN_INFRA_REDIS_NODES:}
-      domain: ${MANYAK_ADMIN_INFRA_OPENSEARCH_DOMAIN:}
-      account-id: ${MANYAK_ADMIN_INFRA_AWS_ACCOUNT_ID:}
+      prometheus-url: ${MANYAK_ADMIN_INFRA_PROMETHEUS_URL:}
+      prometheus-username: ${MANYAK_ADMIN_INFRA_PROMETHEUS_USERNAME:}
+      prometheus-password: ${MANYAK_ADMIN_INFRA_PROMETHEUS_PASSWORD:}
+      prometheus-access-client-id: ${MANYAK_ADMIN_INFRA_PROMETHEUS_ACCESS_CLIENT_ID:}
+      prometheus-access-client-secret: ${MANYAK_ADMIN_INFRA_PROMETHEUS_ACCESS_CLIENT_SECRET:}
+      prometheus-connect-timeout: 1s
+      prometheus-query-timeout: 3s
+      redis-timeout: 1s
     play-stats:
       bucket: ${MANYAK_PLAY_STATS_BUCKET:pubsite_prod_7346202752431827582}
       package-name: ${MANYAK_PLAY_STATS_PACKAGE_NAME:app.manyak}
