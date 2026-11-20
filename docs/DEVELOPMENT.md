@@ -24,7 +24,7 @@ docker compose up -d
 
 ## 로컬 관측 스택(선택)
 
-로그 파이프라인(Fluent Bit → OpenSearch)을 학습하거나 검증할 때만 띄웁니다. 평소 개발에는 필요 없습니다.
+로그 파이프라인(Fluent Bit → OpenSearch)을 학습하거나 검증할 때만 실행합니다. 평소 개발에는 필요 없습니다.
 
 ```bash
 docker compose -f docker-compose.observability.yml up -d
@@ -33,7 +33,7 @@ docker compose -f docker-compose.observability.yml up -d
 - OpenSearch: <http://localhost:9200>
 - OpenSearch Dashboards: <http://localhost:5601>
 
-내릴 때는 `down`, 색인 데이터까지 지우려면 `down -v`를 씁니다.
+멈출 때는 `down`을 씁니다. 색인 데이터까지 지우려면 `down -v`를 씁니다.
 
 ```bash
 docker compose -f docker-compose.observability.yml down
@@ -92,7 +92,7 @@ remote 발행 어댑터는 활성 프로파일에 따라 선택합니다.
 - **local 프로파일은 Kafka**를 사용합니다. `SPRING_KAFKA_BOOTSTRAP_SERVERS`(호스트 실행 기본 `localhost:9092`)를 주입하며 compose에서는 서버가 접근할 수 있는 브로커 listener 주소를 사용합니다. 토픽은 `push.requested`, 키는 회원 `publicId`입니다.
 - **dev, prod 프로파일은 SQS 표준 큐**를 사용하며 메시지 키와 그룹 ID를 설정하지 않습니다. `MANYAK_PUSH_QUEUE_URL`은 필수이며 누락되거나 공백이면 기동에 실패합니다. `AWS_REGION`의 기본값은 `ap-northeast-2`입니다. 자격증명은 AWS SDK 기본 체인을 사용하므로 실행 환경에 붙은 IAM 역할로 발행합니다.
 
-코드의 기본 모드는 `local`이고, dev와 운영은 `MANYAK_PUSH_MODE=remote`와 큐 URL을 넣어 원격 모드로 운영합니다. `local`은 서버 안 발송기로 되돌리는 롤백 경로입니다.
+코드의 기본 모드는 `local`입니다. dev와 운영은 `MANYAK_PUSH_MODE=remote`와 큐 URL을 넣어 원격 모드로 운영합니다. `local`은 서버 안 발송기로 되돌리는 롤백 경로입니다.
 
 `manyak.push.outbox.*` 설정은 `application.yml`에서 관리합니다. 기본 폴링 2초, 배치 100개, 임대 60초, 배치 전송 제한 20초, 실패 백오프 5초~5분, 포기 기준 24시간입니다. 릴레이는 내부 전용 단일 스레드 스케줄러에서 실행하므로 브로커 대기가 다른 정기 작업을 막지 않습니다. 이 스케줄러는 빈으로 노출하지 않아 기본 스케줄러와 `@Async` 실행기 선택을 유지합니다.
 
@@ -117,14 +117,14 @@ remote 발행 어댑터는 활성 프로파일에 따라 선택합니다.
 - OpenAPI JSON: `GET /v3/api-docs`
 - Swagger UI: `GET /swagger-ui.html`
 
-공개 비즈니스 API는 `/api/v1` prefix를 사용합니다. 내부 API `GET /internal/users/{publicId}/push-eligibility`는 별도 prefix 없이 `kind`와 `at`을 필수로 받으며 공개 OpenAPI 문서에서 제외합니다.
+공개 비즈니스 API는 `/api/v1` prefix를 씁니다. 내부 API `GET /internal/users/{publicId}/push-eligibility`는 별도 prefix가 없습니다. 이 API는 `kind`와 `at`을 필수로 받습니다. 공개 OpenAPI 문서에는 넣지 않습니다.
 
 ## 스키마 문서
 
-DB 스키마 문서는 [tbls](https://github.com/k1LoW/tbls)로 **실 DB에서 자동 생성**합니다. Flyway 마이그레이션이 진실원본이고, 문서는 거기서 파생됩니다.
+DB 스키마 문서는 [tbls](https://github.com/k1LoW/tbls)로 **실 DB에서 자동 생성**합니다. 기준은 Flyway 마이그레이션입니다. 문서는 마이그레이션을 적용한 DB에서 만듭니다.
 
-- **현행 스키마**: `dbdoc/`(tbls 자동 생성, ER 다이어그램 포함). 손으로 고치지 않습니다.
-- **목표(설계) 스키마**: `docs/schema-roadmap.sql`(수기, 새 기능 설계 시 갱신). ERDCloud는 유지보수를 중단했습니다.
+- **현행 스키마**: `dbdoc/`(tbls 자동 생성, ER 다이어그램 포함). 직접 고치지 않습니다.
+- **목표(설계) 스키마**: `docs/schema-roadmap.sql`(직접 관리, 새 기능 설계 때 갱신). ERDCloud는 더 관리하지 않습니다.
 
 스키마(마이그레이션)를 바꾸면 문서를 재생성해 함께 커밋합니다. `tbls diff` CI(`.github/workflows/db-docs.yml`)가 마이그레이션 변경 시 문서 드리프트를 차단합니다.
 
@@ -153,33 +153,33 @@ brew install tbls          # 최초 1회
 
 ## 기능 메모
 
-아래 두 기능의 정본은 하네스 스펙입니다. 이 절은 운영할 때 자주 찾는 값만 모아 둡니다.
+아래 두 기능의 기준 문서는 하네스 스펙입니다. 이 절에는 운영할 때 자주 찾는 값만 모았습니다.
 
 ### 이프 만료 예정 안내
 
-정본: [NOTIFICATION 백엔드 파이프라인](https://github.com/KIM-N-KANG/knk-harness/blob/dev/docs/domain/NOTIFICATION/BACKEND/4-1-PIPELINES.md)
+기준 문서: [NOTIFICATION 백엔드 파이프라인](https://github.com/KIM-N-KANG/knk-harness/blob/dev/docs/spec/NOTIFICATION/BACKEND/4-1-PIPELINES.md)
 
-푸시와 알림함의 이프 만료 예정 링크는 `/my/credits?tab=history`로 내역 탭을 엽니다. 기존 UTM 규칙은 유지하며, 출석 리마인드는 `/my/credits?tab=free`를 사용합니다.
+푸시와 알림함의 이프 만료 예정 링크는 `/my/credits?tab=history`입니다. 이 링크는 내역 탭을 엽니다. 기존 UTM 규칙은 그대로 씁니다. 출석 리마인드는 `/my/credits?tab=free`를 씁니다.
 
-매일 10:00 KST에 `now < expires_at <= now + 24h`, `remaining > 0` 로트를 가진 활성 회원을 조회합니다. 회원별 창 안 가장 늦은 만료 시각을 `expiresAt`으로 사용하며 무기한 승계 로트는 제외합니다. `CREDIT_EXPIRY_REMINDER`는 SERVICE이며 광고 동의와 광고 표기가 없습니다. 데이터에는 `type`, `title`, `body`, `deepLink`, 발송기가 추가하는 `recipientId`만 있고 금액, 수량, 만료 시각을 넣지 않습니다.
+매일 10:00 KST에 `now < expires_at <= now + 24h`이고 `remaining > 0`인 로트가 있는 활성 회원을 조회합니다. 회원별 조회 창에서 가장 늦은 만료 시각을 `expiresAt`으로 씁니다. 무기한 승계 로트는 제외합니다. `CREDIT_EXPIRY_REMINDER`는 SERVICE이며 광고 동의와 광고 표기가 없습니다. 데이터에는 `type`, `title`, `body`, `deepLink`와 발송기가 더하는 `recipientId`만 있습니다. 금액, 수량, 만료 시각은 넣지 않습니다.
 
-알림함에는 푸시 설정이나 토큰과 관계없이 ACTIVITY로 기록하고, 원격 모드에서는 대상 회원 전원의 푸시 요청을 같은 회차 트랜잭션에 기록하고 소비자가 서비스 설정과 토큰을 재확인합니다. 두 모드 모두 커밋 후 알림함 대상 전체에 7일 쿨다운을 겁니다. 로컬 모드는 쿨다운 기록 뒤 트랜잭션 밖에서 자격을 재확인하고 발송기를 호출합니다. Redis 조회 실패는 기록 전에 중단하고, 커밋 뒤 쿨다운 저장 실패는 요청을 유지하며 회차 실패를 기록합니다.
+알림함에는 푸시 설정이나 토큰과 관계없이 ACTIVITY로 기록합니다. 원격 모드에서는 대상 회원 전원의 푸시 요청을 같은 회차 트랜잭션에 기록합니다. 소비자는 발송 직전에 서비스 설정과 토큰을 다시 확인합니다. 두 모드 모두 커밋 뒤 알림함 대상 전체에 7일 쿨다운을 겁니다. 로컬 모드는 쿨다운 기록 뒤 트랜잭션 밖에서 자격을 다시 확인하고 발송기를 호출합니다. Redis 조회에 실패하면 기록 전에 멈춥니다. 커밋 뒤 쿨다운 저장에 실패하면 요청은 그대로 두고 회차 실패를 기록합니다.
 
 - `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_ENABLED`: 기본 `true`
 - `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_CRON`: 기본 `0 0 10 * * *`, KST
 - `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_TITLE`: 기본 `이프 만료 예정 안내`
 - `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_BODY`: 기본 `곧 만료되는 이프가 있어요`
 
-관리자 `/api/v1/admin/push/templates/credit_expiry_reminder`의 GET, PUT, DELETE로 문구를 조회, 변경, 기본값 복원합니다. 금액이나 수량, 충전이나 이용 권유 문구를 넣지 않습니다. 발송 시각을 옮기면 만료 창이 겹치거나 비는 구간이 생깁니다. 배포 순서는 알림 서비스 → 서버(V114 마이그레이션 포함) → 관리자 웹입니다.
+관리자 `/api/v1/admin/push/templates/credit_expiry_reminder`에서 GET은 문구 조회, PUT은 변경, DELETE는 기본값 복원입니다. 금액, 수량, 충전이나 이용 권유 문구는 넣지 않습니다. 발송 시각을 옮기면 만료 창이 겹치거나 비는 구간이 생깁니다. 배포 순서는 알림 서비스 → 서버(V114 마이그레이션 포함) → 관리자 웹입니다.
 
 ### 관리자 스토리 공개 중단
 
-정본: [MODERATION 백엔드 파이프라인](https://github.com/KIM-N-KANG/knk-harness/blob/dev/docs/domain/MODERATION/BACKEND/4-1-PIPELINES.md)
+기준 문서: [MODERATION 백엔드 파이프라인](https://github.com/KIM-N-KANG/knk-harness/blob/dev/docs/spec/MODERATION/BACKEND/4-1-PIPELINES.md)
 
 관리자 토큰으로 `POST /api/v1/admin/moderation/stories/{storyId}/takedown`을 호출합니다. 사유 분류 `reasonCode`는 `SEXUAL_CONTENT`, `COPYRIGHT_INFRINGEMENT`, `HATE_SPEECH`, `ETC`이며 기타일 때만 `reasonDetail`(1~100자)이 필수입니다. 선택 메모 `memo`(1~500자)는 감사 로그에만 남깁니다.
 
-공개 중단은 스토리를 비공개로 바꾸고 대기, 보류 중인 수정 제출본을 `STORY_TAKEN_DOWN` 실패로 끝냅니다. 이후 소유자의 수정이 검수를 통과하면 중단 표시를 지웁니다. 중단 상태에서 공개 범위만 PUBLIC으로 바꿔도 즉시 공개하지 않고 202 검수 접수로 응답합니다.
+공개 중단은 스토리를 비공개로 바꿉니다. 대기 중이거나 보류 중인 수정 제출본은 `STORY_TAKEN_DOWN` 실패로 끝냅니다. 이후 소유자의 수정이 검수를 통과하면 중단 표시를 지웁니다. 중단 상태에서 공개 범위만 PUBLIC으로 바꾸면 바로 공개하지 않고 202 검수 접수로 응답합니다.
 
 탈퇴하지 않은 소유자에게는 같은 트랜잭션에서 활동 알림 내역을 기록합니다. 푸시는 SERVICE 설정을 따릅니다. **알림 서비스의 `STORY_TAKEN_DOWN` 허용을 서버보다 먼저 배포**해야 합니다. 수동 검증은 [공개 중단 요청](../http/admin/story-takedown.http)을 따릅니다.
 
-공개 중단 알림의 제목 부분은 이름 토큰 치환 후 코드포인트 기준 100자까지 사용합니다. 넘으면 앞 99자와 `…`로 줄이며 서로게이트 쌍을 보존합니다. 내역과 푸시 본문에 같은 규칙을 적용하고 저장된 스토리 제목은 유지합니다.
+공개 중단 알림의 제목 부분은 이름 토큰 치환 뒤 코드포인트 기준 100자까지 씁니다. 100자를 넘으면 앞 99자와 `…`로 줄입니다. 이때 서로게이트 쌍은 보존합니다. 알림 내역과 푸시 본문에 같은 규칙을 적용합니다. 저장된 스토리 제목은 그대로 둡니다.
