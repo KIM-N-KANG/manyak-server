@@ -4,38 +4,15 @@ import org.assertj.core.api.Assertions.*
 import org.junit.jupiter.api.Test
 
 class InfraMetricCatalogTests {
-    @Test fun `운영 리소스별 원 지표와 CloudWatch namespace 차원 통계량을 만든다`() {
-        val props = InfraMetricsProperties(cluster = "cluster-secret", services = "server=manyak-prod,ai=manyak-prod-ai,notification=manyak-prod-notification",
-            loadBalancer = "app/manyak-prod-alb/test", cacheClusters = "manyak-prod-redis-rg-001,manyak-prod-redis-rg-002", database = "private-rds", domain = "manyak-logs", accountId = "000000000000")
-        val queries = InfraMetricCatalog(props).queries()
-        assertThat(queries).hasSize(29)
+    @Test fun `앱 호스트 4개와 RDS 5개만 만들고 비어 있는 묶음은 질의하지 않는다`() {
+        val queries = InfraMetricCatalog(InfraMetricsProperties(hostAsg = "manyak-prod-host", database = "private-rds")).queries(900)
+        assertThat(queries).hasSize(9).allMatch { it.metricStat().period() == 900 && it.returnData() }
         assertThat(queries.map { it.id() }).doesNotHaveDuplicates()
-        assertThat(queries).allMatch { it.metricStat().period() == 300 && it.returnData() }
-        val ecs = queries.filter { it.metricStat().metric().namespace() == "AWS/ECS" }
-        assertThat(ecs).hasSize(12)
-        for ((_, service) in props.servicePairs()) {
-            val serviceQueries = ecs.filter { q -> q.metricStat().metric().dimensions().any { it.name() == "ServiceName" && it.value() == service } }
-            assertThat(serviceQueries).hasSize(4)
-            for (metric in listOf("CPUUtilization", "MemoryUtilization")) {
-                assertThat(serviceQueries.filter { it.metricStat().metric().metricName() == metric }.map { it.metricStat().stat() })
-                    .containsExactlyInAnyOrder("Average", "Maximum")
-            }
-            assertThat(serviceQueries).allMatch { q -> q.metricStat().metric().dimensions().associate { it.name() to it.value() } ==
-                mapOf("ClusterName" to "cluster-secret", "ServiceName" to service) }
-        }
-        val running = queries.filter { it.metricStat().metric().metricName() == "RunningTaskCount" }
-        assertThat(running).isEmpty()
-        assertThat(queries.filter { it.id().endsWith("_cpu") && it.metricStat().metric().namespace() == "AWS/ECS" }.flatMap { it.metricStat().metric().dimensions() }.filter { it.name() == "ServiceName" }.map { it.value() })
-            .containsExactlyInAnyOrderElementsOf(props.servicePairs().map { it.second })
-        assertThat(queries.single { it.id() == "alb_elb_5xx" }.metricStat().metric().metricName()).isEqualTo("HTTPCode_ELB_5XX_Count")
-        val redis = queries.filter { it.metricStat().metric().namespace() == "AWS/ElastiCache" }
-        assertThat(redis).allMatch { it.metricStat().metric().dimensions().map { d -> d.name() } == listOf("CacheClusterId") }
-        assertThat(redis.filter { it.id().endsWith("_cpu") }).allMatch { it.metricStat().metric().metricName() == "EngineCPUUtilization" }
-        assertThat(queries.filter { it.id().endsWith("connections") }).allMatch { it.metricStat().stat() == "Maximum" }
-        val p95 = queries.single { it.metricStat().stat() == "p95" }
-        assertThat(p95.metricStat().metric().metricName()).isEqualTo("TargetResponseTime")
-        assertThat(queries.filter { it.metricStat().metric().namespace() == "AWS/ElastiCache" }).hasSize(6)
-        assertThat(queries.filter { it.metricStat().metric().namespace() == "AWS/ES" }).hasSize(2).allMatch {
-            it.metricStat().metric().dimensions().associate { d -> d.name() to d.value() } == mapOf("DomainName" to "manyak-logs", "ClientId" to "000000000000") }
+        assertThat(queries.map { it.metricStat().metric().namespace() }.distinct()).containsExactlyInAnyOrder("AWS/EC2", "AWS/RDS")
+        assertThat(queries.filter { it.metricStat().metric().namespace() == "AWS/EC2" }).hasSize(4).allMatch {
+            it.metricStat().metric().dimensions().associate { d -> d.name() to d.value() } == mapOf("AutoScalingGroupName" to "manyak-prod-host") }
+        assertThat(InfraMetricCatalog(InfraMetricsProperties(database = "private-rds")).queries()).hasSize(5)
+        assertThat(InfraMetricCatalog(InfraMetricsProperties(hostAsg = "manyak-prod-host")).queries()).hasSize(4)
+        assertThat(InfraMetricCatalog(InfraMetricsProperties()).queries()).isEmpty()
     }
 }

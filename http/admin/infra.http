@@ -1,10 +1,10 @@
-# 관리자 인프라 지표 — BACKEND 4-2-33·34, KNK-1776 ECS Maximum 개정(fed4b2a)
-# 운영 구성은 CloudWatch 질의 29개: ECS 12(Average/Maximum 별도), ALB 4, RDS 5, Redis 6, OpenSearch 2.
+# 관리자 인프라 지표 — ADMIN BACKEND 4-2-34(지표), 4-2-35(DB 테이블), KNK-2113 출처 개편
+# 출처 셋을 나란히 부른다: CloudWatch(앱 호스트 4, RDS 5 질의), 홈서버 Prometheus(기록 규칙 계열), Redis(INFO, DBSIZE).
 # 준비: 로컬 PostgreSQL/Redis 기동 후 ./gradlew bootRun, 관리자 로그인으로 ADMIN 토큰 발급.
 # adminToken/rolelessAdminToken은 http/admin/auth.http에서 준비한 값으로 교체한다.
-# AWS 성공 검증은 6-3의 MANYAK_ADMIN_INFRA_* 7개와 태스크 역할 자격이 있는 환경에서만 수동 실행한다.
-# 기본 개발 환경은 리소스 설정이 모두 비어 metrics=503, db-tables=200이다.
-# 아래 AWS 성공 요청은 실제 AWS를 호출하므로 필요할 때만 개별 실행한다. 자동 테스트는 SDK 대역만 사용한다.
+# 기본 개발 환경은 CloudWatch, Prometheus 설정이 비어 redis 묶음만 값이 있다(200). db-tables=200.
+# 전체 묶음 확인은 6-3의 MANYAK_ADMIN_INFRA_HOST_ASG, ..._RDS_INSTANCE, ..._PROMETHEUS_* 와 AWS 역할 자격이 있는 환경에서만 수동 실행한다.
+# 그 요청은 실제 AWS와 홈서버를 부르므로 필요할 때만 개별 실행한다. 자동 테스트는 대역만 사용한다.
 # 캐시 비교 요청은 바로 위 요청부터 순서대로, metrics는 60초/DB는 5분 안에 실행한다.
 @baseUrl = http://localhost:8080
 @adminToken = REPLACE_ADMIN_TOKEN
@@ -19,7 +19,7 @@ GET {{baseUrl}}/actuator/health
 client.test("서버 기동", () => client.assert(response.status === 200, `actual=${response.status}`));
 %}
 
-### 설정된 환경: 기본 KST 오늘, 300초 간격, 현재 태스크 수
+### 기본 KST 오늘, 300초 간격. 설정된 묶음만 값이 있고 실패한 출처의 묶음은 null + unavailable
 GET {{baseUrl}}/api/v1/admin/infra/metrics
 Authorization: Bearer {{adminToken}}
 
@@ -29,30 +29,31 @@ client.test("인프라 응답 계약", () => {
     const b = response.body;
     client.assert(b.from === b.to && b.periodSeconds === 300, JSON.stringify(b));
     client.assert(Number.isFinite(Date.parse(b.asOf)), `asOf=${b.asOf}`);
-    if (b.ecs !== null) b.ecs.services.forEach(s => {
-        [s.runningTasks, s.desiredTasks, s.pendingTasks].forEach(v => client.assert(Number.isInteger(v) && v >= 0, `count=${v}`));
-        client.assert(typeof s.name === "string", JSON.stringify(s));
-        ["cpu", "memory", "cpuMax", "memoryMax"].forEach(key => client.assert(Array.isArray(s[key]), `ECS ${key} actual=${JSON.stringify(s)}`));
-        for (const [average, maximum] of [["cpu", "cpuMax"], ["memory", "memoryMax"]]) {
-            s[maximum].forEach(p => {
-                const avg = s[average].find(a => a.at === p.at);
-                if (avg) client.assert(p.value >= avg.value, `${maximum} >= ${average}: ${JSON.stringify(p)}`);
-            });
-        }
-    });
+    const keys = ["host", "hostSystem", "requests", "rds", "redis", "opensearch"];
+    keys.forEach(k => client.assert(k in b, `묶음 키 ${k} 없음`));
+    client.assert(Array.isArray(b.unavailable) && b.unavailable.every(k => keys.includes(k) && b[k] === null), `unavailable=${b.unavailable}`);
     const series = [];
-    if (b.ecs !== null) b.ecs.services.forEach(s => series.push(s.cpu, s.memory, s.cpuMax, s.memoryMax));
-    if (b.alb !== null) series.push(b.alb.requests, b.alb.elb5xx, b.alb.target5xx, b.alb.responseTimeP95Ms);
+    if (b.host !== null) series.push(b.host.cpu, b.host.cpuMax, b.host.cpuCreditBalance, b.host.statusCheckFailed);
+    if (b.hostSystem !== null) {
+        series.push(b.hostSystem.memoryAvailableBytes);
+        const mounts = b.hostSystem.disks.map(d => d.mount);
+        client.assert(JSON.stringify(mounts) === JSON.stringify([...mounts].sort()), `디스크 오름차순 ${mounts}`);
+        b.hostSystem.disks.forEach(d => series.push(d.availableBytes));
+    }
+    if (b.requests !== null) series.push(b.requests.requests, b.requests.server5xx, b.requests.responseTimeP95Ms);
     if (b.rds !== null) series.push(b.rds.cpu, b.rds.freeStorageBytes, b.rds.connections, b.rds.readLatencyMs, b.rds.writeLatencyMs);
-    if (b.redis !== null) b.redis.nodes.forEach(n => series.push(n.cpu, n.memory, n.connections));
-    if (b.opensearch !== null) series.push(b.opensearch.freeStorageBytes, b.opensearch.jvmMemoryPressure);
+    if (b.opensearch !== null) {
+        client.assert([null, "green", "yellow", "red"].includes(b.opensearch.status), `status=${b.opensearch.status}`);
+        series.push(b.opensearch.diskAvailableBytes, b.opensearch.jvmMemoryPressure);
+    }
+    if (b.redis !== null) ["usedMemoryBytes", "maxMemoryBytes", "connectedClients", "keys"].forEach(k =>
+        client.assert(Number.isInteger(b.redis[k]) && b.redis[k] >= 0, `redis.${k}=${b.redis[k]}`));
     series.forEach(points => points.forEach((p, i) => {
         client.assert(Number.isFinite(p.value), JSON.stringify(p));
         if (i > 0) client.assert(Date.parse(points[i - 1].at) < Date.parse(p.at), "점 오름차순");
     }));
-    if (b.alb !== null) [b.alb.requests, b.alb.elb5xx, b.alb.target5xx].forEach(points => points.forEach((p, i) => {
-        if (i > 0) client.assert(Date.parse(p.at) - Date.parse(points[i - 1].at) === b.periodSeconds * 1000, "건수 빈 구간 포함");
-    }));
+    if (b.requests !== null) [b.requests.requests, b.requests.server5xx].forEach(points =>
+        points.forEach(p => client.assert(Number.isInteger(p.value), `건수는 정수: ${JSON.stringify(p)}`)));
     client.global.set("infraAsOf", b.asOf);
 });
 %}
@@ -138,20 +139,22 @@ Authorization: Bearer {{rolelessAdminToken}}
 
 > {% client.test("역할 없음 거절", () => client.assert(response.status === 403, `actual=${response.status}`)); %}
 
-### 개발 환경 전용: 설정 모두 비어 있으면 503 (AWS 호출 없음)
-# AWS 장애/불완전 결과/5초 초과/쿨다운/갱신 중도 캐시 없으면 동일 503.
-# 같은 범위의 만료 캐시가 있으면 200과 이전 asOf. SDK 대역 통합 테스트로 검증한다.
-GET {{baseUrl}}/api/v1/admin/infra/metrics
+### 개발 환경 전용: CloudWatch와 Prometheus 설정이 비어 redis 묶음만 응답 (AWS, 홈서버 호출 없음)
+# 설정이 비어 null인 묶음은 unavailable에 넣지 않는다. 로컬 Redis를 내리면 부른 출처가 모두 실패해 503(캐시가 없을 때).
+# 출처 하나의 실패(권한 거부, 호출 제한, 불완전 결과, 시간 초과)는 200과 그 묶음 null. 대역 통합 테스트로 검증한다.
+GET {{baseUrl}}/api/v1/admin/infra/metrics?from=2026-11-19&to=2026-11-19
 Authorization: Bearer {{adminToken}}
 
 > {%
-client.test("인프라 사용 불가", () => {
-    client.assert(response.status === 503, `actual=${response.status}`);
-    client.assert(response.body.code === "SERVICE_UNAVAILABLE", JSON.stringify(response.body));
+client.test("개발 환경 redis 묶음만", () => {
+    client.assert(response.status === 200, `actual=${response.status}`);
+    const b = response.body;
+    client.assert(b.redis !== null && b.unavailable.length === 0, JSON.stringify(b));
+    ["host", "hostSystem", "requests", "rds", "opensearch"].forEach(k => client.assert(b[k] === null, `${k}=${JSON.stringify(b[k])}`));
 });
 %}
 
-### 자유 조회: 날짜/환경에 맞춰 수정 (실제 AWS 호출 가능)
+### 자유 조회: 날짜/환경에 맞춰 수정 (실제 AWS, 홈서버 호출 가능)
 GET {{baseUrl}}/api/v1/admin/infra/metrics?from={{from}}&to={{to}}
 Authorization: Bearer {{adminToken}}
 
