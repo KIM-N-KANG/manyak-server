@@ -6,8 +6,6 @@
 
 AI 스토리 채팅 서비스 **마냑**의 API 서버
 
-[![Docker Image](https://github.com/KIM-N-KANG/manyak-server/actions/workflows/docker-image.yml/badge.svg?branch=dev)](https://github.com/KIM-N-KANG/manyak-server/actions/workflows/docker-image.yml)
-
 </div>
 
 ## 목차
@@ -125,40 +123,6 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
 
 > 아래 구성은 최종 발표(2026년 11월 14일) 기준입니다.
 
-인프라는 Ver.1부터 여섯 단계를 거쳐 Ver.6의 이중화 구성에 이르렀습니다.
-
-#### Ver.1. 첫 운영과 계층 분리
-
-![클라우드 아키텍처 Ver.1](docs/images/cloud-architecture-v1.png)
-
-EC2 한 대의 Docker Compose에서 server와 ai를 함께 실행하며 첫 운영을 시작했습니다. 네트워크는 퍼블릭, 앱, 데이터 서브넷으로 나눴습니다. RDS PostgreSQL과 Redis는 처음부터 관리형 서비스로 두었습니다. 배포는 SSM으로 했습니다.
-
-#### Ver.2. 컨테이너 운영 전환
-
-![클라우드 아키텍처 Ver.2](docs/images/cloud-architecture-v2.png)
-
-Docker Compose 구성을 ECS 태스크 하나로 옮겼습니다. 컨테이너 로그는 FireLens로 OpenSearch에 모았습니다. 배포는 새 태스크로 교체하는 방식으로 바꿨습니다. 전환을 마친 뒤 EC2는 회수했습니다.
-
-#### Ver.3. 서비스 분리
-
-![클라우드 아키텍처 Ver.3](docs/images/cloud-architecture-v3.png)
-
-푸시 발송을 독립 알림 서비스로 떼어 냈습니다. 알림 서비스와 잇는 데 SQS, DLQ, Cloud Map을 더했습니다. 알림 서비스가 호출하는 내부 API는 공개 ALB에서 막았습니다. 스토리 검색용 OpenSearch 색인(nori)도 이때 넣었습니다.
-
-#### Ver.4. 이중화 계획
-
-![클라우드 아키텍처 Ver.4](docs/images/cloud-architecture-v4.png)
-
-Ver.4는 계획안입니다. 세 앱을 두 가용 영역에 나눠 두고 RDS Multi-AZ, Redis 복제, 가용 영역별 NAT를 두는 안입니다. 이 계획은 Ver.5에서 적용했습니다.
-
-#### Ver.5. 분산 추적과 이중화 적용
-
-![클라우드 아키텍처 Ver.5](docs/images/cloud-architecture-v5.png)
-
-Data Prepper로 세 앱의 트레이스를 모았습니다. OpenSearch에서 서비스 맵과 트레이스를 볼 수 있습니다. Ver.4의 이중화도 이때 적용했습니다. 서비스마다 태스크를 최소 2개, 최대 4개로 오토스케일링합니다. RDS는 Multi-AZ, Redis는 자동 장애 조치가 켜진 복제 구성입니다.
-
-#### Ver.6. 관측 통합
-
 ![클라우드 아키텍처 Ver.6](docs/images/cloud-architecture-v6.png)
 
 Ver.6은 두 가용 영역에 걸친 이중화 구성입니다.
@@ -168,13 +132,67 @@ Ver.6은 두 가용 영역에 걸친 이중화 구성입니다.
 - **관측**: 세 앱의 OTLP를 OTel Collector가 받아 로그와 트레이스는 OpenSearch로, 메트릭은 Prometheus로 보냅니다.
 - **배포**: 레포별 GitHub OIDC 역할로 ECR에 이미지를 올리고 ECS 서비스를 교체합니다.
 
+<details>
+<summary><b>Ver.1 ~ Ver.5 발전 과정</b></summary>
+
+<br>
+
+**1) Ver.1 첫 운영과 계층 분리**
+
+![클라우드 아키텍처 Ver.1](docs/images/cloud-architecture-v1.png)
+
+Ver.1은 첫 운영과 계층 분리에 중점을 두었습니다. EC2 한 대의 Docker Compose에서 server와 ai를 실행하고 퍼블릭, 앱, 데이터 서브넷을 나눴습니다. RDS PostgreSQL과 Redis는 처음부터 관리형 서비스로 두었습니다.
+
+**2) Ver.2 컨테이너 운영 전환**
+
+![클라우드 아키텍처 Ver.2](docs/images/cloud-architecture-v2.png)
+
+Ver.2는 컨테이너 운영 전환에 중점을 두었습니다. Docker Compose 구성을 ECS 태스크 하나로 옮기고 컨테이너 로그를 FireLens로 OpenSearch에 모았습니다. 전환을 마친 뒤 EC2는 회수했습니다.
+
+**3) Ver.3 서비스 분리**
+
+![클라우드 아키텍처 Ver.3](docs/images/cloud-architecture-v3.png)
+
+Ver.3은 서비스 분리에 중점을 두었습니다. 푸시 발송을 독립 알림 서비스로 떼어 내고 SQS, DLQ, Cloud Map을 더했습니다. 스토리 검색용 OpenSearch 색인(nori)도 이때 넣었습니다.
+
+**4) Ver.4 이중화 계획**
+
+![클라우드 아키텍처 Ver.4](docs/images/cloud-architecture-v4.png)
+
+Ver.4는 가용성 이중화에 중점을 둔 계획안입니다. 세 앱을 두 가용 영역에 나누고 RDS Multi-AZ, Redis 복제, 가용 영역별 NAT를 두는 안을 그렸습니다. 이 계획은 Ver.5에서 적용했습니다.
+
+**5) Ver.5 분산 추적과 이중화 적용**
+
+![클라우드 아키텍처 Ver.5](docs/images/cloud-architecture-v5.png)
+
+Ver.5는 분산 추적과 이중화 적용에 중점을 두었습니다. Data Prepper로 세 앱의 트레이스를 모아 OpenSearch에서 서비스 맵을 볼 수 있게 했습니다. 서비스마다 태스크를 최소 2개, 최대 4개로 늘리고 RDS Multi-AZ와 Redis 자동 장애 조치를 켰습니다.
+
+</details>
+
 ### 2-3. 데이터베이스 ERD와 마이그레이션
 
 테이블은 64개입니다. Flyway 마이그레이션은 125개(V1~V128)입니다. 아래 그림은 핵심 테이블 11개의 관계입니다.
 
 ![핵심 테이블 관계](docs/images/erd-core.png)
 
-스키마 문서는 [tbls](https://github.com/k1LoW/tbls)로 실제 DB에서 자동 생성합니다. CI(`db-docs.yml`)는 마이그레이션을 실제 PostgreSQL에 적용해 문서와 비교합니다. 차이가 나면 PR이 통과하지 못합니다. 전체 ERD와 테이블별 컬럼은 [dbdoc](dbdoc/README.md)에 있습니다.
+핵심 밖 테이블까지 도메인별로 나누면 다음과 같습니다.
+
+| 도메인 | 테이블 수 | 대표 테이블 |
+| --- | --- | --- |
+| 회원과 인증 | 5 | `users`, `social_accounts`, `user_consents`, `user_personas` |
+| 스토리 | 30 | `stories`, `story_characters`, `story_creation_sessions`, `home_sections` |
+| 채팅 | 9 | `story_chats`, `story_messages`, `story_choices`, `chat_models` |
+| 이프와 결제 | 7 | `credit_wallets`, `credit_transactions`, `credit_lots`, `credit_orders` |
+| 알림 | 6 | `push_outbox`, `push_campaigns`, `device_push_tokens`, `user_notifications` |
+| 검수 | 1 | `story_submissions` |
+| 공지 | 1 | `notices` |
+| 관리자 | 4 | `admin_accounts`, `admin_audit_logs`, `admin_analytics_daily_values` |
+| 그 밖 | 1 | `ai_call_logs` |
+| 합계 | 64 | |
+
+전체 ERD와 테이블별 컬럼은 [dbdoc](dbdoc/README.md)에 있습니다.
+
+스키마 문서는 [tbls](https://github.com/k1LoW/tbls)로 실제 DB에서 자동 생성합니다. CI(`db-docs.yml`)는 마이그레이션을 실제 PostgreSQL에 적용해 문서와 비교합니다. 차이가 나면 PR이 통과하지 못합니다.
 
 ### 2-4. API 문서화와 수동 검증
 
@@ -246,9 +264,9 @@ API 오퍼레이션은 앱용 93개, 관리자용 90개로 모두 183개입니�
 
 ![관측과 장애 진단](docs/images/observability.png)
 
-세 앱은 OpenTelemetry로 로그, 트레이스, 메트릭을 보냅니다. 로그에는 요청 ID와 트레이스 ID가 함께 남습니다. 그래서 로그 한 줄에서 서버, AI, 알림 서비스까지 이어진 트레이스로 바로 넘어갈 수 있습니다. 애플리케이션 오류는 Sentry, LLM 호출과 비용은 Langfuse, 사용자 행동은 Amplitude로 확인합니다.
+로그에는 요청 ID와 트레이스 ID가 함께 남습니다. 그래서 로그 한 줄에서 서버, AI, 알림 서비스까지 이어진 트레이스로 바로 넘어갈 수 있습니다. 애플리케이션 오류는 Sentry, LLM 호출과 비용은 Langfuse, 사용자 행동은 Amplitude로 확인합니다.
 
-**진단 에이전트**는 장애 후보의 원인을 진단하는 별도 서비스입니다. 1분마다 규칙으로 감시합니다. 이상 후보가 3분 이어지면 LLM이 읽기 전용 도구로 트레이스, 로그, 메트릭을 조회해 진단합니다. 진단 근거는 코드로 다시 검증한 뒤 Slack에 보고합니다. 부하 테스트에서 찾은 병목 4건을 재현해 평가했습니다. 3건은 두 번 모두 원인을 맞혔습니다. DB CPU 포화는 장애 감지만 맞혔습니다. 보관 자료를 다시 넣은 평가에서는 DB CPU 포화도 다섯 번 모두 원인을 맞혔습니다. 진단 한 건의 비용은 $0.1~0.3입니다.
+**진단 에이전트**는 장애 후보의 원인을 진단하는 별도 서비스입니다. 규칙에 걸린 이상 후보가 3분 이어지면 LLM이 읽기 전용 도구로 트레이스, 로그, 메트릭을 조회해 진단합니다. 진단 근거는 코드로 다시 검증한 뒤 Slack에 보고합니다. 부하 테스트에서 찾은 병목 4건을 재현해 평가했습니다. 3건은 두 번 모두 원인을 맞혔습니다. DB CPU 포화는 장애 감지만 맞혔습니다. 보관 자료를 다시 넣은 평가에서는 DB CPU 포화도 다섯 번 모두 원인을 맞혔습니다. 진단 한 건의 비용은 $0.1~0.3입니다.
 
 관리자 페이지의 운영 탭은 RDS, Redis, OpenSearch 같은 인프라 지표를 한곳에 모아 보여 줍니다.
 
@@ -298,6 +316,8 @@ API 오퍼레이션은 앱용 93개, 관리자용 90개로 모두 183개입니�
 ![브랜치와 릴리스 흐름](docs/images/branch-flow.png)
 
 기능 브랜치는 최신 `dev`에서 만들어 Squash로 머지합니다. 릴리스는 `dev`에서 만든 `release/vX.Y.Z`를 `main`에 Merge Commit으로 머지합니다. 머지한 커밋에는 태그를 붙입니다. `main` 머지가 운영 배포를 시작합니다. 릴리스 PR에는 포함 PR과 함께 이미지 배포만으로 끝나지 않는 "코드 외 할 일"을 적습니다. 그 항목이 모두 끝나야 릴리스를 닫습니다.
+
+긴급 수정도 따로 hotfix 브랜치를 두지 않고 같은 길로 patch 릴리스를 냅니다(예: v0.4.2, v0.14.5). v0.5.3은 예외입니다. dev에 아직 내보내지 않은 변경이 많아 main에서 만든 릴리스 브랜치에 수정 하나만 cherry-pick했습니다.
 
 브랜치, 커밋, PR 제목은 Jira 티켓 키로 묶습니다(`[KNK-123] Feat: ...`). 2026-06-25 v0.1.0부터 2026-11-20 v0.15.2까지 태그 78개를 붙였습니다. 병합한 PR은 562개입니다.
 
