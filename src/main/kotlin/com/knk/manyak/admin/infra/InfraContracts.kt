@@ -23,19 +23,21 @@ class InfraMetricsQuery {
 }
 data class InfraRange(val from: LocalDate, val to: LocalDate, val since: Instant, val until: Instant, val periodSeconds: Int)
 data class InfraMetricPoint(val at: Instant, val value: Double)
-data class InfraServiceMetrics(val name: String, val runningTasks: Int, val desiredTasks: Int, val pendingTasks: Int,
-    val cpu: List<InfraMetricPoint>, val memory: List<InfraMetricPoint>,
-    val cpuMax: List<InfraMetricPoint>, val memoryMax: List<InfraMetricPoint>)
-data class InfraEcsMetrics(val services: List<InfraServiceMetrics>)
-data class InfraAlbMetrics(val requests: List<InfraMetricPoint>, val elb5xx: List<InfraMetricPoint>, val target5xx: List<InfraMetricPoint>, val responseTimeP95Ms: List<InfraMetricPoint>)
+// ADMIN 4-2-34. 묶음은 출처별로 비며, 설정이 비어 null인 묶음은 unavailable에 넣지 않는다.
+data class InfraHostMetrics(val cpu: List<InfraMetricPoint>, val cpuMax: List<InfraMetricPoint>,
+    val cpuCreditBalance: List<InfraMetricPoint>, val statusCheckFailed: List<InfraMetricPoint>)
+data class InfraDisk(val mount: String, val totalBytes: Long?, val availableBytes: List<InfraMetricPoint>)
+data class InfraHostSystemMetrics(val memoryTotalBytes: Long?, val memoryAvailableBytes: List<InfraMetricPoint>, val disks: List<InfraDisk>)
+data class InfraRequestMetrics(val requests: List<InfraMetricPoint>, val server5xx: List<InfraMetricPoint>, val responseTimeP95Ms: List<InfraMetricPoint>)
 data class InfraRdsMetrics(val cpu: List<InfraMetricPoint>, val freeStorageBytes: List<InfraMetricPoint>, val connections: List<InfraMetricPoint>, val readLatencyMs: List<InfraMetricPoint>, val writeLatencyMs: List<InfraMetricPoint>)
-data class InfraRedisNode(val id: String, val cpu: List<InfraMetricPoint>, val memory: List<InfraMetricPoint>, val connections: List<InfraMetricPoint>)
-data class InfraRedisMetrics(val nodes: List<InfraRedisNode>)
-data class InfraSearchMetrics(val freeStorageBytes: List<InfraMetricPoint>, val jvmMemoryPressure: List<InfraMetricPoint>)
-data class InfraMetricsResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val periodSeconds: Int,
-    val ecs: InfraEcsMetrics?, val alb: InfraAlbMetrics?, val rds: InfraRdsMetrics?, val redis: InfraRedisMetrics?, val opensearch: InfraSearchMetrics?)
+data class InfraRedisMetrics(val usedMemoryBytes: Long, val maxMemoryBytes: Long, val connectedClients: Long, val keys: Long, val aofLastWriteOk: Boolean?)
+data class InfraSearchMetrics(val status: String?, val diskTotalBytes: Long?, val diskAvailableBytes: List<InfraMetricPoint>, val jvmMemoryPressure: List<InfraMetricPoint>)
+data class InfraMetricsResponse(val asOf: Instant, val from: LocalDate, val to: LocalDate, val periodSeconds: Int, val unavailable: List<String>,
+    val host: InfraHostMetrics?, val hostSystem: InfraHostSystemMetrics?, val requests: InfraRequestMetrics?,
+    val rds: InfraRdsMetrics?, val redis: InfraRedisMetrics?, val opensearch: InfraSearchMetrics?)
 data class InfraTableSize(val schema: String, val name: String, val totalBytes: Long, val tableBytes: Long, val indexBytes: Long, val estimatedRows: Long)
 data class InfraDatabaseSnapshot(val databaseBytes: Long, val tableCount: Long, val tables: List<InfraTableSize>)
 data class InfraDatabaseResponse(val asOf: Instant, val databaseBytes: Long, val tableCount: Long, val tables: List<InfraTableSize>)
 class InfraMetricsUnavailable : RuntimeException("인프라 지표를 가져올 수 없습니다.")
-class InfraFetchFailure(val reason: String, val service: String?, val errorCode: String? = null) : RuntimeException()
+/** 출처 하나의 실패. 메시지에 원문을 담지 않는다(ADMIN 5-4). */
+class InfraFetchFailure(val reason: String, val service: String, val errorCode: String? = null) : RuntimeException()
