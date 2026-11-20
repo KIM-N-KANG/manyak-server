@@ -473,11 +473,11 @@ gitGraph
     commit id: "v0.15.1" tag: "v0.15.1"
     branch dev
     checkout dev
-    commit id: "기능 PR (Squash)"
-    commit id: "기능 PR (Squash) "
+    commit id: "기능 A"
+    commit id: "기능 B"
     branch release/v0.15.2
     checkout main
-    merge release/v0.15.2 id: "릴리스 PR (Merge Commit)" tag: "v0.15.2"
+    merge release/v0.15.2 id: "릴리스" tag: "v0.15.2"
 ```
 
 기능 브랜치는 최신 `dev`에서 따고 Squash로 머지합니다. 릴리스는 `dev`에서 `release/vX.Y.Z`를 따서 `main`에 Merge Commit으로 머지하고 태그를 붙입니다. `main` 머지가 운영 배포를 시작합니다. 릴리스 PR에는 포함 PR과 함께 이미지 배포만으로 끝나지 않는 "코드 외 할 일"을 적고, 그 항목이 끝나야 릴리스를 닫습니다.
