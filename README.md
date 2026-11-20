@@ -236,7 +236,6 @@ erDiagram
     users ||--o{ social_accounts : "로그인 수단"
     users ||--o| credit_wallets : "지갑"
     users ||--o{ credit_transactions : "이프 원장"
-    credit_transactions |o--o{ credit_lots : "적립 로트"
     users ||..o{ stories : "소유"
     stories ||--o{ story_characters : "인물"
     stories ||--o{ story_chats : "채팅"
@@ -391,7 +390,7 @@ flowchart LR
     CHK --> RES["응답"]
     OS -->|"실패, 시간 초과"| FB["DB 대체 검색"]
     FB --> RES
-    EV["스토리 변경 이벤트"] -.->|"커밋 뒤 색인"| IDX[("stories 인덱스")]
+    EV["스토리 변경<br/>이벤트"] -.->|"커밋 뒤 색인"| IDX[("stories 인덱스")]
     CRON["매일 04:30 재색인"] -.-> IDX
 
     classDef comp fill:#E8F2E8,stroke:#527A59,color:#182D1D
@@ -444,22 +443,17 @@ flowchart LR
 
 ### 2-13. 비용 최적화
 
-청구 상세 기준 하루 금액을 30일로 환산한 값입니다(USD, VAT 제외). 두 날 모두 두 가용 영역, Multi-AZ RDS, Redis 복제, NAT 2개의 이중화를 유지한 상태입니다.
+이중화와 관측 확장으로 늘어난 AWS 비용을, 7일 사용량을 근거로 태스크 사양을 줄이고 Fargate Spot과 Graviton으로 전환해, 다중 AZ 구성은 유지한 채 월 환산 약 560달러에서 약 400달러로 줄였습니다.
 
-| 항목 | 줄이기 전(11/09) | 줄인 뒤(11/15) |
+| 항목 | 줄이기 전(11/02~11/09, 8일 평균) | 줄인 뒤(11/11~11/15, 5일 평균) |
 | --- | --- | --- |
-| 하루 합계 | 19.11 | 13.15 |
-| 30일 환산 | 약 573 | 약 395 |
-| ECS(Fargate) | 7.11 | 2.34 |
-| EC2(NAT 등) | 2.91 | 2.93 |
-| OpenSearch | 2.04 | 2.04 |
-| RDS | 1.51 | 1.39 |
-| ElastiCache | 1.20 | 1.16 |
-| ALB | 1.09 | 1.08 |
+| 하루 평균 | 18.75 | 13.30 |
+| 30일 환산 | 약 560 | 약 400 |
+| 그중 ECS(Fargate) 하루 평균 | 7.15 | 2.32 |
 
-하루 5.96달러, 약 31%를 줄였습니다. 이중화는 그대로 두고 다음을 바꿨습니다.
+금액은 청구 상세 기준 기간 평균이고 USD, VAT 제외입니다. 두 기간 모두 두 가용 영역, Multi-AZ RDS, Redis 복제, NAT 2개의 이중화를 유지한 상태이며, 약 29%를 줄였습니다. 바꾼 것은 다음과 같습니다.
 
-- 서비스별 CPU와 메모리 사용량을 보고 태스크 사양을 맞췄습니다. 예를 들어 server는 CPU p95가 40.5%여서 1 vCPU에서 0.5 vCPU로 줄였습니다.
+- 서비스별 7일 CloudWatch 시간별 최대 사용량을 보고 태스크 사양을 맞췄습니다(비공개 인프라 레포 PR #136). 예를 들어 server는 CPU p95가 40.5%여서 1 vCPU에서 0.5 vCPU로 줄였습니다.
 - server와 ai는 온디맨드 태스크 1개를 기본으로 두고 나머지를 Fargate Spot으로 돌립니다.
 - 앱 태스크를 Graviton(ARM64)으로 옮기고 RDS와 Redis도 t4g로 바꿨습니다. 이미지는 두 아키텍처로 빌드합니다.
 
@@ -474,6 +468,7 @@ flowchart LR
 ### 3-2. 형상 관리와 릴리스
 
 ```mermaid
+%%{init: {"gitGraph": {"rotateCommitLabel": false}}}%%
 gitGraph
     commit id: "v0.15.1" tag: "v0.15.1"
     branch dev
