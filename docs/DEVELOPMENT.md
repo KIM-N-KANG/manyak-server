@@ -49,13 +49,15 @@ docker compose -f docker-compose.observability.yml down
 
 ## 환경변수
 
-로컬 실행에도 DB 접속 환경변수가 필요합니다. 필요한 변수 목록은 `.env.example`에 있습니다.
+로컬 실행에도 DB 접속 환경변수가 필요합니다. 필요한 변수 목록은 `.env.example`에 있습니다. 처음에는 이 파일을 `.env`로 복사해 값을 채웁니다.
 
 `docker compose`는 현재 디렉터리의 `.env` 파일을 자동으로 읽습니다. Spring Boot를 IntelliJ에서 실행할 때는 Run Configuration의 Environment variables에 값을 직접 넣습니다.
 
 필요한 환경변수는 다음과 같습니다.
 
 ```bash
+MANYAK_DB_NAME=<DB 이름>
+MANYAK_DB_PORT=<로컬 DB 포트>
 MANYAK_DB_URL=jdbc:postgresql://localhost:<MANYAK_DB_PORT>/<MANYAK_DB_NAME>
 MANYAK_DB_USERNAME=<DB 사용자>
 MANYAK_DB_PASSWORD=<DB 비밀번호>
