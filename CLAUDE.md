@@ -77,7 +77,7 @@
 ### DB 스키마 문서
 
 - DB 스키마(마이그레이션)를 변경하면 `scripts/gen-db-docs.sh`로 `dbdoc/`(tbls가 실 DB에서 생성하는 ERD 문서)를 재생성해 함께 커밋합니다. 현행 ERD는 `dbdoc/`, 목표 설계는 `docs/schema-roadmap.sql`을 보며, ERDCloud는 유지보수하지 않습니다.
-- 아키텍처 문서는 현재/목표를 분리 관리합니다: 현재 구현 스펙 = 레포 `docs/architecture-v1.drawio`, 이상적 목표(To-Be) = 노션 "Manyak 서버 아키텍처"(버전 관리 DB). 둘을 섞지 않습니다.
+- 아키텍처 문서는 현재/목표를 분리 관리합니다: 인프라 도면 = 레포 `docs/images/cloud-architecture-v1.png`~`v6.png`(버전별, 원본 drawio는 manyak-terraform `docs/architecture/`. `docs/architecture-v1.*`은 초기 도면), 이상적 목표(To-Be) = 노션 "Manyak 서버 아키텍처"(버전 관리 DB). 둘을 섞지 않습니다.
 
 ### 배포·릴리스
 
