@@ -351,14 +351,15 @@ class InfraMetricsServiceTests {
     @Test fun `'일부 실패의 캐시' Prometheus만 실패한 응답도 60초 보관하고 61초 뒤 세 출처를 다시 부른다`(): Unit = InfraFixture().use { f ->
         f.prometheus.failure = { MockResponse().setResponseCode(500) }
         val first = f.service.metrics(InfraMetricsQuery())
-        val calls = f.prometheus.requests.size
+        // 실패한 질의 뒤에도 이미 보낸 다른 질의가 늦게 도착할 수 있어 요청 수 대신 조회 시각(time)으로 호출을 가른다.
+        fun queryTimes() = f.prometheus.requests.mapNotNull { it.param("time") }.toSet()
         f.clock.at = f.clock.at.plusSeconds(59)
         assertThat(f.service.metrics(InfraMetricsQuery())).isSameAs(first)
-        assertThat(f.prometheus.requests).hasSize(calls); verify(f.redis, times(1)).fetch()
+        assertThat(queryTimes()).doesNotContain(f.clock.instant().epochSecond.toString()); verify(f.redis, times(1)).fetch()
         f.prometheus.failure = null; f.clock.at = f.clock.at.plusSeconds(2)
         assertThat(f.service.metrics(InfraMetricsQuery()).unavailable).isEmpty()
         verify(f.cw, times(2)).getMetricData(any(GetMetricDataRequest::class.java)); verify(f.redis, times(2)).fetch()
-        assertThat(f.prometheus.requests.size).isGreaterThan(calls)
+        assertThat(queryTimes()).contains(f.clock.instant().epochSecond.toString())
     }
 
     @Test fun `'실패와 캐시'와 '쿨다운' 모두 실패하면 만료된 캐시나 503이고 30초 안에는 다시 부르지 않는다`(): Unit = InfraFixture().use { f ->
