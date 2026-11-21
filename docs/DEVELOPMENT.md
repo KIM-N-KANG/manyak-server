@@ -10,9 +10,10 @@ PostgreSQL과 Redis를 실행합니다.
 docker compose up -d
 ```
 
-서버를 실행합니다.
+서버를 실행합니다. Gradle은 `.env`를 읽지 않으므로 값을 셸에 먼저 올립니다(아래 [환경변수](#환경변수)).
 
 ```bash
+set -a; source .env; set +a
 ./gradlew bootRun
 ```
 
