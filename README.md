@@ -83,6 +83,8 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
 
 ### 1-4. 개발 환경
 
+최종 발표(2026-11-14) 시점의 버전입니다. 지금 빌드 버전은 `build.gradle.kts`를 따릅니다.
+
 - **서버**: Kotlin 2.2.21, Spring Boot 4.0.6, Java 21, Gradle 9.5.1
 - **저장소**: PostgreSQL 16과 Flyway, Redis 7, OpenSearch(nori)
 - **테스트와 문서**: JUnit 5, Testcontainers, ArchUnit, springdoc-openapi, tbls
