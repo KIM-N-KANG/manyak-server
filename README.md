@@ -85,7 +85,7 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
 
 ### 1-4. 개발 환경
 
-- **서버**: Kotlin 2.3.21, Spring Boot 4.1.2, Java 25, Gradle 9.5.1
+- **서버**: Kotlin 2.2.21, Spring Boot 4.0.6, Java 21, Gradle 9.5.1
 - **저장소**: PostgreSQL 16과 Flyway, Redis 7, OpenSearch(nori)
 - **테스트와 문서**: JUnit 5, Testcontainers, ArchUnit, springdoc-openapi, tbls
 - **관측**: OpenTelemetry, Sentry
