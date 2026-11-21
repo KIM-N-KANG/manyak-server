@@ -40,9 +40,9 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
 
 ### 1-1. 프로젝트 소개
 
-마냑은 사용자가 고른 키워드로 AI가 스토리를 만드는 서비스입니다. 사용자는 그 스토리 속 인물과 채팅하며 이야기를 이어 갑니다. 서비스 주소는 <https://www.manyak.app>입니다.
+마냑은 사용자가 고른 태그로 AI가 스토리를 생성하는 서비스입니다. 사용자는 그 스토리 속 인물과 채팅하며 스토리를 이어 갑니다. 서비스 주소는 <https://www.manyak.app>입니다.
 
-이 레포는 마냑의 API 서버입니다. 회원과 인증, 스토리 제작과 탐색, 채팅 턴 생성, 재화(이프) 결제, 알림, 관리자 기능을 맡습니다. AI•SW 마에스트로 17기 김앤강 팀이 2026년 6월부터 개발했습니다.
+이 레포는 마냑의 API 서버입니다. 회원과 인증, 스토리 제작과 탐색, 채팅 턴 생성, 이프와 결제, 알림, 관리자 기능을 맡습니다. AI•SW 마에스트로 17기 김앤강 팀이 2026년 6월부터 개발했습니다.
 
 | 레포 | 역할 |
 | --- | --- |
@@ -57,7 +57,7 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
 
 ![시스템 구성도](docs/images/system-architecture.png)
 
-서버는 요청마다 요청 ID를 붙이고, AI 서버와 알림 서비스에도 같은 ID와 추적 정보를 넘겨 한 요청의 흐름을 서비스 사이에서 이어 봅니다.
+서버는 요청마다 요청 ID를 붙이고, AI 서버에도 같은 ID와 추적 정보를 넘겨 두 서비스에 걸친 요청 흐름을 추적합니다.
 
 ### 1-3. 주요 기능
 
@@ -65,21 +65,21 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
   <tr>
     <td align="center"><img src="docs/images/screen-quick-create-genre.png" width="180" alt="간편 제작 장르 선택"></td>
     <td align="center"><img src="docs/images/screen-quick-create-protagonist.png" width="180" alt="간편 제작 주인공 설정"></td>
-    <td align="center"><img src="docs/images/screen-quick-create-style.png" width="180" alt="간편 제작 이미지 스타일 선택"></td>
+    <td align="center"><img src="docs/images/screen-quick-create-style.png" width="180" alt="간편 제작 화풍 선택"></td>
     <td align="center"><img src="docs/images/screen-chat-choices.png" width="160" alt="채팅 선택지"></td>
     <td align="center"><img src="docs/images/screen-realtime-image.png" width="180" alt="채팅 중 실시간 이미지"></td>
   </tr>
   <tr>
     <td align="center">간편 제작: 장르</td>
     <td align="center">간편 제작: 주인공</td>
-    <td align="center">간편 제작: 이미지 스타일</td>
+    <td align="center">간편 제작: 화풍</td>
     <td align="center">채팅 선택지</td>
     <td align="center">실시간 이미지</td>
   </tr>
 </table>
 
-- **스토리 제작**: 장르, 주인공, 주변 인물을 키워드로 고르면 AI가 스토리라인 세 개를 제안하고, 하나를 고르면 스토리가 완성됩니다.
-- **채팅**: 스토리 속 인물과 턴 단위로 대화합니다. 응답 다시 만들기, 선택지, 실시간 이미지, 특정 턴에서 새 채팅으로 갈라지기를 지원합니다.
+- **스토리 제작**: 장르, 주인공, 주변 인물의 태그를 고르면 AI가 스토리라인 세 개를 제안하고, 하나를 고르면 스토리가 완성됩니다.
+- **채팅**: 스토리 속 인물과 턴 단위로 대화합니다. 응답 재생성, 선택지, 실시간 이미지, 특정 턴에서 새 채팅 만들기(포크)를 지원합니다.
 - **탐색과 알림**: 홈 섹션, 공개 목록, 검색과 푸시 알림을 제공합니다.
 - **이프와 관리자**: 턴과 이미지 생성에 재화인 이프를 쓰고, 관리자 API로 검수와 운영 지표를 관리합니다.
 
@@ -96,7 +96,7 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
 
 ![manyak-server 내부 구조](docs/images/backend-architecture.png)
 
-서버는 하나의 애플리케이션을 모듈 14개로 나눈 구조(모듈러 모놀리스)입니다. 다른 모듈의 리포지토리나 엔티티를 직접 참조하거나 모듈끼리 순환하면 모듈 경계 테스트(ArchUnit)가 빌드를 실패시킵니다. 회원, 스토리, 채팅의 식별자는 UUID이고, 오류 응답은 `code`, `message`, `details` 필드로 맞췄습니다.
+서버는 하나의 애플리케이션을 모듈 14개로 나눈 구조(모듈러 모놀리스)입니다. 다른 모듈의 리포지토리나 엔티티를 직접 참조하거나 모듈끼리 순환하면 모듈 경계 테스트(ArchUnit)가 실패하고 빌드가 멈춥니다. 회원, 스토리, 채팅의 식별자는 UUID이고, 오류 응답은 `code`, `message`, `details` 필드로 맞췄습니다.
 
 ### 2-2. 인프라 아키텍처
 
@@ -155,7 +155,7 @@ API 183개(앱 93개, 관리자 90개)의 OpenAPI 명세는 springdoc이 코드�
 
 ### 2-5. 테스트
 
-전체 테스트 3,971개가 모두 통과합니다(2026-11-21 실행). 하네스 스펙의 테스트 케이스 표를 기준으로, 행마다 입력과 기대 결과를 테스트로 옮깁니다. 대부분 컨트롤러부터 DB 저장까지 확인하는 통합 테스트이고, PostgreSQL과 OpenSearch 동작은 Testcontainers로 확인합니다.
+전체 테스트 3,971개가 모두 통과합니다(2026-11-21 실행). 하네스 스펙의 테스트 케이스 표를 기준으로, 각 행의 입력과 기대 결과로 테스트를 씁니다. 대부분 컨트롤러부터 DB 저장까지 확인하는 통합 테스트이고, PostgreSQL과 OpenSearch 동작은 Testcontainers로 확인합니다.
 
 JaCoCo로 잰 커버리지는 라인 96.7%, 분기 83.3%입니다(2026-11-21 측정). 통합 테스트끼리 Spring 컨텍스트를 함께 쓰고 테스트 안의 대기 시간을 줄여, 전체 실행 시간을 496초에서 196초로 줄였습니다([#480](https://github.com/KIM-N-KANG/manyak-server/pull/480), [#481](https://github.com/KIM-N-KANG/manyak-server/pull/481)).
 
@@ -234,7 +234,7 @@ dev와 main의 배포 잡은 늦게 끝난 옛 빌드가 최신 배포를 덮지
 
 ![관측과 장애 진단](docs/images/observability.png)
 
-로그에 요청 ID와 트레이스 ID가 함께 남아, 로그 한 줄에서 서버, AI, 알림 서비스까지 이어진 트레이스로 넘어갑니다. 오류는 Sentry, LLM 호출과 비용은 Langfuse, 사용자 행동은 Amplitude로 봅니다.
+로그에 요청 ID와 트레이스 ID가 함께 남아, 로그 한 줄에서 서버부터 AI 서버까지 이어진 트레이스를 확인합니다. 오류는 Sentry, LLM 호출과 비용은 Langfuse, 사용자 행동은 Amplitude로 봅니다.
 
 **진단 에이전트**는 지표가 기준을 넘어 이상 징후가 잡히면 3분 동안 신호를 더 모은 뒤, LLM이 읽기 전용 도구로 트레이스, 로그, 메트릭을 조회해 원인을 진단하고 Slack에 보고합니다. 부하 테스트에서 찾은 병목 4건의 장애 구간을 두 번씩 진단하게 한 평가에서 3건의 원인을 두 번 모두 맞혔습니다. 진단 한 건의 비용은 $0.1\~0.3입니다.
 
