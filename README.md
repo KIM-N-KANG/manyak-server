@@ -83,9 +83,7 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
 
 ### 1-4. 개발 환경
 
-최종 발표(2026-11-14) 시점의 버전입니다. 지금 빌드 버전은 `build.gradle.kts`를 따릅니다.
-
-- **서버**: Kotlin 2.2.21, Spring Boot 4.0.6, Java 21, Gradle 9.5.1
+- **서버**: Kotlin 2.3.21, Spring Boot 4.1.2, Java 25, Gradle 9.5.1
 - **저장소**: PostgreSQL 16과 Flyway, Redis 7, OpenSearch(nori)
 - **테스트와 문서**: JUnit 5, Testcontainers, ArchUnit, springdoc-openapi, tbls
 - **관측**: OpenTelemetry, Sentry
@@ -100,7 +98,7 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
 
 ### 2-2. 인프라 아키텍처
 
-> 아래 구성은 최종 발표(2026년 11월 14일) 기준입니다.
+> 아래 인프라 구성은 두 가용 영역 이중화를 유지한 마지막 구성으로, 최종 발표(2026년 11월 14일) 시점입니다.
 
 ![클라우드 아키텍처 Ver.6](docs/images/cloud-architecture-v6.png)
 
@@ -204,7 +202,7 @@ turnCount = storyTurnCounts.countByStoryId(story.id),
 
 ![CI/CD 파이프라인](docs/images/cicd-pipeline.png)
 
-dev와 main의 배포 잡은 늦게 끝난 옛 빌드가 최신 배포를 덮지 않도록 각 브랜치의 최신 커밋만 배포합니다.
+dev와 main의 배포 잡은 늦게 끝난 옛 빌드가 최신 배포를 덮지 않도록 각 브랜치의 최신 커밋만 배포합니다. gitleaks는 PR과 푸시마다 비밀값 유출을, CodeQL은 PR과 dev 푸시, 매주 정기 실행에서 코드 취약점을 검사합니다.
 
 ### 2-8. 채팅 턴 스트리밍
 
@@ -234,9 +232,9 @@ dev와 main의 배포 잡은 늦게 끝난 옛 빌드가 최신 배포를 덮지
 
 ![관측과 장애 진단](docs/images/observability.png)
 
-요청을 처리하며 남긴 로그에는 요청 ID와 트레이스 ID가 함께 남아, 그 요청의 트레이스(서버부터 AI 서버까지)를 바로 찾아갈 수 있습니다. 오류는 Sentry, LLM 호출과 비용은 Langfuse, 사용자 행동은 Amplitude로 봅니다.
+요청을 처리하며 남긴 로그에는 요청 ID와 트레이스 ID가 함께 남아, 그 요청의 트레이스(서버부터 AI 서버, 알림 서비스까지)를 바로 찾아갈 수 있습니다. 오류는 Sentry, LLM 호출과 비용은 Langfuse, 사용자 행동은 Amplitude로 봅니다.
 
-**진단 에이전트**는 지표가 기준을 넘어 이상 징후가 잡히면 3분 동안 신호를 더 모은 뒤, LLM이 읽기 전용 도구로 트레이스, 로그, 메트릭을 조회해 원인을 진단하고 Slack에 보고합니다. 부하 테스트에서 찾은 병목 4건의 장애 구간을 두 번씩 진단하게 한 평가에서 3건의 원인을 두 번 모두 맞혔습니다. 진단 한 건의 비용은 $0.1\~0.3입니다.
+**진단 에이전트**는 지표가 기준을 넘어 이상 징후가 잡히면 3분 동안 신호를 더 모은 뒤, LLM이 읽기 전용 도구로 트레이스, 로그, 메트릭을 조회해 원인을 진단하고 Slack에 보고합니다. 부하 테스트에서 찾은 병목 4건의 장애 구간을 두 번씩 진단하게 한 평가에서 3건의 원인을 두 번 모두 맞혔고, 보관 자료를 다시 넣은 평가에서는 나머지 1건(DB CPU 포화)도 다섯 번 모두 맞혔습니다. 진단 한 건의 비용은 $0.1\~0.3입니다.
 
 <img src="docs/images/admin-ops-storage.png" width="480" alt="관리자 운영 지표 저장소 탭(고정 데이터)">
 
