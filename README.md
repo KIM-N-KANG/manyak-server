@@ -204,7 +204,7 @@ turnCount = storyTurnCounts.countByStoryId(story.id),
 
 ![CI/CD 파이프라인](docs/images/cicd-pipeline.png)
 
-배포 잡은 늦게 끝난 옛 빌드가 최신 배포를 덮지 않도록 main의 최신 커밋만 배포합니다.
+dev와 main의 배포 잡은 늦게 끝난 옛 빌드가 최신 배포를 덮지 않도록 각 브랜치의 최신 커밋만 배포합니다.
 
 ### 2-8. 채팅 턴 스트리밍
 
