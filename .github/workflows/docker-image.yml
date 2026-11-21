@@ -104,6 +104,38 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # 커버리지(KNK-2119). test가 끝나면 jacocoTestReport가 이어 돌므로 테스트를 돌린 실행에만 보고서가 있다.
+      # 수치는 잡 요약에 표로, HTML 보고서는 아티팩트로 남긴다. 기준치로 빌드를 실패시키지 않는다.
+      - name: Coverage summary
+        if: always() && steps.dev-tests.outputs.skip != 'true'
+        run: |
+          python3 - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+
+          path = "build/reports/jacoco/test/jacocoTestReport.xml"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              if not os.path.exists(path):
+                  out.write("### 테스트 커버리지\n\n보고서가 없습니다(테스트가 끝까지 돌지 않았습니다).\n")
+                  raise SystemExit(0)
+              # 보고서 루트의 counter가 전체 합계다(패키지·클래스 counter는 그 아래에 있다).
+              counters = {c.get("type"): c for c in ET.parse(path).getroot().findall("counter")}
+              out.write("### 테스트 커버리지\n\n| 항목 | 비율 | 덮음 / 전체 |\n|---|---:|---:|\n")
+              for kind, label in (("LINE", "라인"), ("BRANCH", "분기")):
+                  covered = int(counters[kind].get("covered"))
+                  total = covered + int(counters[kind].get("missed"))
+                  out.write(f"| {label} | {covered / total:.1%} | {covered:,} / {total:,} |\n")
+          PY
+
+      - name: Upload coverage report
+        if: always() && steps.dev-tests.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-attempt-${{ github.run_attempt }}
+          path: build/reports/jacoco/test/html/
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
