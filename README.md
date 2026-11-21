@@ -126,7 +126,7 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
 
 ![클라우드 아키텍처 Ver.6](docs/images/cloud-architecture-v6.png)
 
-Ver.5까지는 트레이스는 Data Prepper로 보내고, 지표는 앱이 Grafana Cloud로 직접 보냈습니다. 둘을 OTel Collector 하나로 받게 바꾸고 경보도 AMP로 옮긴 것이 Ver.6입니다. 두 가용 영역에 걸친 이중화 구성은 그대로입니다.
+Ver.5까지는 트레이스는 Data Prepper로 보내고, 지표는 앱이 Grafana Cloud로 직접 보냈습니다. 둘을 OTel Collector 하나로 받게 바꾸고 경보도 Prometheus로 옮긴 것이 Ver.6입니다. 두 가용 영역에 걸친 이중화 구성은 그대로입니다.
 
 - **앱**: server, ai, notification을 각각 ECS Fargate 서비스로 두고 서비스마다 오토스케일링합니다. notification은 Cloud Map 주소로 서버의 내부 API를 호출합니다. 공개 ALB는 내부 경로를 막습니다.
 - **데이터**: RDS PostgreSQL은 Multi-AZ, ElastiCache Redis는 Primary와 Replica입니다. 가용 영역마다 NAT Gateway를 둡니다.
