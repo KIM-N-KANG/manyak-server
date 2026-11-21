@@ -13,6 +13,7 @@ import tools.jackson.databind.ObjectMapper
  * OpenAPI 태그와 서버 주소 정리(KNK-2124).
  * - 태그는 이름을 붙인 것만 쓴다. springdoc 기본 이름(`*-controller`)이 생기면 실패한다.
  * - 관리자 경로는 `Admin ` 태그, 앱 경로는 그 밖의 태그다. manyak-web이 태그 이름으로 생성 폴더를 나눈다.
+ * - 상단 태그 목록(Swagger UI 묶음 순서)은 앱 태그를 이름순으로, 그 뒤에 관리자 태그를 이름순으로 둔다.
  * - servers는 상대 주소 `/` 하나다. TLS를 끝내는 프록시 뒤에서 생성 주소가 http로 나오던 문제를 막는다.
  * - operationId는 태그 정리 전과 같다. manyak-admin과 manyak-web이 operationId로 생성 코드 이름을 만든다.
  *   목록은 `openapi/operation-ids.txt`(정리 전 이 테스트 컨텍스트에서 뽑은 값)에 고정한다.
@@ -60,6 +61,16 @@ class OpenApiTagsIntegrationTests : IntegrationTest() {
                 assertThat(tag.startsWith("Admin ")).isEqualTo(admin)
             }
         }
+    }
+
+    @Test fun `상단 태그 목록은 앱 태그를 이름순으로 두고 관리자 태그를 그 뒤에 이름순으로 둔다`() {
+        val listed = api["tags"].toList().map { it["name"].asText() }
+        // Swagger UI는 이 목록 순서로 묶음을 보여 준다. 목록에 빠진 태그는 순서가 안 먹으므로 모두 있어야 한다.
+        assertThat(listed).describedAs("상단 태그 목록").containsAll(productOperations().flatMap { it.tags }.toSet())
+        val (admin, app) = listed.partition { it.startsWith("Admin ") }
+        assertThat(app).isNotEmpty.isSorted
+        assertThat(admin).isNotEmpty.isSorted
+        assertThat(listed).containsExactlyElementsOf(app + admin)
     }
 
     @Test fun `servers는 상대 주소 하나다`() {
