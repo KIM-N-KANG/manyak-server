@@ -8,7 +8,6 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.context.annotation.Profile
 import org.springframework.kafka.core.DefaultKafkaProducerFactory
 import org.springframework.kafka.core.KafkaTemplate
 import tools.jackson.databind.ObjectMapper
@@ -32,9 +31,10 @@ class KafkaPushPublisher(
     override fun close() { executor.close() }
 }
 
+// 브로커는 프로필이 아니라 manyak.push.broker로 고른다(KNK-2125). 기본값은 local이 kafka, 그 밖은 sqs다(yml).
 @Configuration(proxyBeanMethods = false)
-@Profile("local")
 @ConditionalOnProperty(name = ["manyak.push.mode"], havingValue = "remote")
+@ConditionalOnProperty(name = ["manyak.push.broker"], havingValue = "kafka")
 class KafkaPushConfig {
     @Bean
     fun pushKafkaProducerFactory(
