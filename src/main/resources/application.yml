@@ -302,6 +302,10 @@ manyak:
       # S3 호환 저장소 엔드포인트(로컬 MinIO 검증용). 값이 있으면 path-style로 그 주소에 붙고,
       # 비어 있으면 AWS 기본 엔드포인트를 쓴다. 운영은 비워 둔다.
       endpoint: ${MANYAK_CHARACTER_IMAGE_ENDPOINT:}
+      # 서버 자신의 S3 호출(업로드, HEAD, 복사, 삭제)만 보낼 내부 주소(KNK-2125). 비면 위 endpoint를 쓴다.
+      # presigned URL은 브라우저, 앱, ai가 쓰므로 늘 위 endpoint(공개 주소)로 서명한다. 홈서버 dev는 공개 주소가
+      # Cloudflare를 거치는데, Cloudflare가 HEAD를 GET으로 바꿔 서명이 깨져 서버 호출은 http://minio:9000으로 바로 보낸다.
+      internal-endpoint: ${MANYAK_CHARACTER_IMAGE_INTERNAL_ENDPOINT:}
   cors:
     allowed-origins: ${MANYAK_CORS_ALLOWED_ORIGINS}
   payment:
