@@ -4,7 +4,6 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.context.annotation.Profile
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.sqs.SqsAsyncClient
@@ -37,8 +36,8 @@ class SqsPushPublisher(
 }
 
 @Configuration(proxyBeanMethods = false)
-@Profile("dev | prod")
 @ConditionalOnProperty(name = ["manyak.push.mode"], havingValue = "remote")
+@ConditionalOnProperty(name = ["manyak.push.broker"], havingValue = "sqs")
 class SqsPushConfig {
     @Bean
     fun pushSqsClient(

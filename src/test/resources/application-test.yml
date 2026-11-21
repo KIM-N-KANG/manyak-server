@@ -46,6 +46,8 @@ manyak:
       # 정기 재색인 스케줄러를 끈다. 테스트는 스케줄러를 직접 호출한다.
       enabled: false
   push:
+    # remote 모드 테스트는 브로커 없이 아웃박스까지만 본다(SQS와 Kafka 발행기를 만들지 않는다).
+    broker: none
     credit-expiry-reminder:
       enabled: false
     attendance-reminder:
