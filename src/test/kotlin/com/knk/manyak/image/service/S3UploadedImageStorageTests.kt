@@ -36,6 +36,22 @@ class S3UploadedImageStorageTests {
         }
     }
 
+    // 서버 자신의 S3 호출(HEAD, 복사)은 내부 주소로 바로 간다. presigned URL은 브라우저와 앱이 쓰는 공개 주소로 서명한다.
+    // 홈서버 dev(KNK-2125)에서 공개 주소는 Cloudflare를 거치는데, Cloudflare가 HEAD를 GET으로 바꿔 서명이 깨졌다.
+    @Test
+    fun `내부 엔드포인트가 있으면 서버 S3 호출만 그 주소로 간다`() {
+        val storage = EndpointProbe(endpoint = "https://dev-s3.example.test", internalEndpoint = "http://minio:9000")
+
+        assertThat(storage.clientEndpoint()).isEqualTo(java.net.URI.create("http://minio:9000"))
+    }
+
+    @Test
+    fun `내부 엔드포인트가 없으면 서버 S3 호출도 공개 엔드포인트로 간다`() {
+        val storage = EndpointProbe(endpoint = "https://dev-s3.example.test", internalEndpoint = "")
+
+        assertThat(storage.clientEndpoint()).isEqualTo(java.net.URI.create("https://dev-s3.example.test"))
+    }
+
     @Test
     fun `없는 객체의 404는 없음으로 본다`() {
         val storage = storage(s3Error(404))
@@ -62,6 +78,17 @@ class S3UploadedImageStorageTests {
         endpoint = "",
         baseUrl = "https://cdn.example.test",
     )
+
+    /** 실제 클라이언트를 만들어 엔드포인트만 읽는다(호출은 하지 않으므로 자격증명이 필요 없다). */
+    private class EndpointProbe(endpoint: String, internalEndpoint: String) : S3UploadedImageStorage(
+        bucket = "manyak-assets",
+        region = "us-east-1",
+        endpoint = endpoint,
+        baseUrl = "https://cdn.example.test",
+        internalEndpoint = internalEndpoint,
+    ) {
+        fun clientEndpoint() = client!!.use { it.serviceClientConfiguration().endpointOverride().orElse(null) }
+    }
 
     private class ThrowingS3Client(private val error: RuntimeException) : S3Client {
         override fun serviceName(): String = "s3"

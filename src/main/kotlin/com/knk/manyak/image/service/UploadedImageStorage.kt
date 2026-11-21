@@ -59,6 +59,8 @@ class S3UploadedImageStorage(
     @param:Value("\${manyak.asset.character-image.region:}") private val region: String,
     @param:Value("\${manyak.asset.character-image.endpoint:}") private val endpoint: String,
     @param:Value("\${manyak.asset.character-image.base-url:}") private val baseUrl: String,
+    // 서버 자신의 S3 호출(HEAD, 복사)만 보낼 내부 주소(KNK-2125). 비면 endpoint를 쓴다. presign은 늘 endpoint로 서명한다.
+    @param:Value("\${manyak.asset.character-image.internal-endpoint:}") private val internalEndpoint: String = "",
 ) : UploadedImageStorage {
 
     private val configured: Boolean get() = bucket.isNotBlank() && baseUrl.isNotBlank()
@@ -82,14 +84,15 @@ class S3UploadedImageStorage(
 
     // protected는 테스트가 가짜 S3 클라이언트로 갈아끼우기 위한 최소 이음매다.
     protected open val client: S3Client? by lazy {
+        val clientEndpoint = internalEndpoint.ifBlank { endpoint }
         if (!configured) {
             null
         } else {
             S3Client.builder()
                 .apply { if (region.isNotBlank()) region(Region.of(region)) }
                 .apply {
-                    if (endpoint.isNotBlank()) {
-                        endpointOverride(URI.create(endpoint))
+                    if (clientEndpoint.isNotBlank()) {
+                        endpointOverride(URI.create(clientEndpoint))
                         forcePathStyle(true)
                     }
                 }
