@@ -4,6 +4,7 @@ plugins {
     id("org.springframework.boot") version "4.1.2"
     id("io.spring.dependency-management") version "1.1.7"
     kotlin("plugin.jpa") version "2.3.21"
+    jacoco
 }
 
 group = "com.knk"
@@ -152,6 +153,24 @@ tasks.withType<Test> {
     // 명시적으로 쓰며, 응답 기반(503/429) 재시도만 끄고 IOException 재시도는 기본값 그대로 둔다.
     // 아래 설정은 reactor-netty 풀에만 적용되므로 현재 RestTestClient에는 효과가 없을 가능성이 높다.
     systemProperty("reactor.netty.pool.maxIdleTime", "0")
+}
+
+// 테스트 커버리지(KNK-2119). test가 끝나면 보고서(XML은 CI 잡 요약, HTML은 사람이 보는 용도)를 만든다.
+// toolVersion은 Java 25 클래스 파일을 지원하는 0.8.14로 고정한다(Gradle 기본값보다 새 버전). 측정 대상에서 빼는 클래스는 없다.
+jacoco {
+    toolVersion = "0.8.14"
+}
+
+tasks.test {
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required = true
+        html.required = true
+    }
 }
 
 tasks.bootJar {
