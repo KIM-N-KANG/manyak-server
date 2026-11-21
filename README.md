@@ -96,7 +96,7 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
 
 ![manyak-server 내부 구조](docs/images/backend-architecture.png)
 
-모듈 사이 화살표는 실제 코드 의존을 줄여 그린 것으로, 모두 위 모듈에서 아래 모듈로 향합니다. 회원, 스토리, 채팅의 공개 ID는 UUID(`public_id`)이고, 오류 응답에는 `code`, `message`, `details` 등 공통 필드를 둡니다.
+모듈 사이 화살표는 실제 코드의 의존 방향을 줄여 그린 것입니다. 회원, 스토리, 채팅의 공개 ID는 UUID(`public_id`)이고, 오류 응답에는 `code`, `message`, `details` 등 공통 필드를 둡니다.
 
 ### 2-2. 인프라 아키텍처
 
