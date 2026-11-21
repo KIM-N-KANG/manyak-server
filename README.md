@@ -46,7 +46,7 @@ AI 스토리 채팅 서비스 **마냑**의 API 서버
 
 | 레포 | 역할 |
 | --- | --- |
-| [knk-harness](https://github.com/KIM-N-KANG/knk-harness) | 도메인 스펙과 팀 공용 LLM 작업 하네스 |
+| [knk-harness](https://github.com/KIM-N-KANG/knk-harness) | 도메인 스펙과 LLM 에이전트의 작업 규칙, 도구 모음(하네스) |
 | [manyak-ai](https://github.com/KIM-N-KANG/manyak-ai) | 스토리와 채팅 턴을 생성하는 AI 서버(Python, FastAPI) |
 | [manyak-notification](https://github.com/KIM-N-KANG/manyak-notification) | 푸시를 보내는 알림 서비스(Kotlin, Spring Boot) |
 | [manyak-web](https://github.com/KIM-N-KANG/manyak-web) | 웹 클라이언트와 BFF(Next.js) |
@@ -218,7 +218,7 @@ turnCount = storyTurnCounts.countByStoryId(story.id),
 
 ![CI/CD 파이프라인](docs/images/cicd-pipeline.png)
 
-운영 배포는 latest 태그를 먼저 옮긴 뒤 ECS 서비스를 교체하고, 헬스나 스모크 검사에 실패하면 태그를 직전 이미지로 되돌려 다시 배포합니다. gitleaks는 dev와 main을 대상으로 한 PR과 두 브랜치 푸시마다 비밀값 유출 여부를, CodeQL은 같은 PR과 dev 푸시, 매주 정기 실행에서 코드 취약점을 검사합니다.
+최종 발표 시점의 운영 배포(ECS)는 latest 태그를 먼저 옮긴 뒤 서비스를 교체하고, 헬스나 스모크 검사에 실패하면 태그를 직전 이미지로 되돌려 다시 배포합니다. gitleaks는 dev와 main을 대상으로 한 PR과 두 브랜치 푸시마다 비밀값 유출 여부를, CodeQL은 같은 PR과 dev 푸시, 매주 정기 실행에서 코드 취약점을 검사합니다.
 
 **실행 화면**
 
