@@ -3,11 +3,13 @@ package com.knk.manyak.admin.infra
 import com.knk.manyak.adminkit.query.badAdminQuery
 import com.knk.manyak.global.error.ApiErrorResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.servlet.http.HttpServletRequest
 import org.springdoc.core.annotations.ParameterObject
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
+@Tag(name = "Admin Infra", description = "관리자 인프라 지표 API")
 @RestController
 @RequestMapping("/api/v1/admin/infra")
 @SecurityRequirement(name = "bearerAuth")

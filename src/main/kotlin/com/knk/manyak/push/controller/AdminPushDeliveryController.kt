@@ -3,10 +3,12 @@ package com.knk.manyak.push.controller
 import com.knk.manyak.push.dto.PushDeliveryType
 import com.knk.manyak.push.dto.PushKind
 import com.knk.manyak.push.service.PushDeliveryService
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.format.annotation.DateTimeFormat
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDate
 
+@Tag(name = "Admin Push", description = "관리자 푸시 발송 API")
 @RestController
 @RequestMapping("/api/v1/admin/push/delivery-stats")
 class AdminPushDeliveryController(private val service: PushDeliveryService) {
