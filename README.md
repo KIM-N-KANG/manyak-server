@@ -139,7 +139,7 @@ RDS, Redis, NAT가 모두 한 가용 영역에 있어 그 영역에 장애가 �
 
 ![클라우드 아키텍처 Ver.5](docs/images/cloud-architecture-v5.png)
 
-요청 ID만으로는 채팅 턴 처리가 어디서 멈췄는지 찾지 못했습니다. Data Prepper로 세 앱의 트레이스를 모으고, Ver.4의 이중화를 적용했습니다.
+요청 ID만으로는 채팅 턴 처리가 어디서 멈췄는지 찾지 못했습니다. Data Prepper로 서비스의 트레이스를 모으고, Ver.4의 이중화를 적용했습니다.
 
 </details>
 
@@ -218,8 +218,6 @@ turnCount = storyTurnCounts.countByStoryId(story.id),
 
 ![CI/CD 파이프라인](docs/images/cicd-pipeline.png)
 
-최종 발표 시점의 운영 배포(ECS)는 latest 태그를 먼저 옮긴 뒤 서비스를 교체하고, 헬스나 스모크 검사에 실패하면 태그를 직전 이미지로 되돌려 다시 배포합니다. gitleaks는 dev와 main을 대상으로 한 PR과 두 브랜치 푸시마다 비밀값 유출 여부를, CodeQL은 같은 PR과 dev 푸시, 매주 정기 실행에서 코드 취약점을 검사합니다.
-
 **실행 화면**
 
 <img src="docs/images/cicd-actions-run.png" width="640" alt="GitHub Actions 실행 화면(dev 푸시)">
@@ -264,7 +262,7 @@ AI 응답이 끝나기까지 10초 안팎이 걸려, 그사이 사용자가 앱�
 
 ![관측과 장애 진단](docs/images/observability.png)
 
-그림은 최종 발표 시점의 구성입니다. 세 앱의 트레이스, 지표, 로그는 수집 태스크 하나를 거쳐 지표는 Prometheus에, 로그와 트레이스는 OpenSearch에 쌓입니다. 경보는 지표를 보고, 진단 에이전트는 두 저장소를 모두 조회합니다.
+그림은 최종 발표 시점의 구성입니다. 서비스의 트레이스, 지표, 로그는 수집 태스크 하나를 거쳐 지표는 Prometheus에, 로그와 트레이스는 OpenSearch에 쌓입니다. 경보는 지표를 보고, 진단 에이전트는 두 저장소를 모두 조회합니다.
 
 **진단 에이전트**
 
