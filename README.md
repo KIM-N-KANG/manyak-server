@@ -161,7 +161,7 @@ JaCoCo로 잰 커버리지는 라인 96.7%, 분기 83.3%입니다(2026-11-21 측
 
 ### 2-6. 리팩터링
 
-모듈 경계 위반을 세는 테스트를 먼저 넣고, 위반이 늘지 않게 막은 채 하나씩 줄였습니다. 다른 모듈의 리포지토리와 엔티티를 참조하던 268곳, 모듈 사이 순환 47건, `global`의 도메인 의존 22건을 모두 없앴습니다([#539](https://github.com/KIM-N-KANG/manyak-server/pull/539)). 이제 위반이 하나라도 생기면 빌드가 실패합니다.
+모듈 경계 위반을 세는 테스트를 먼저 넣고, 위반이 늘지 않게 막은 채 하나씩 줄였습니다. 다른 모듈의 리포지토리와 엔티티를 참조하던 268곳, 모듈 사이 순환 47건, `global`의 도메인 의존 22건을 모두 없앴습니다([#482](https://github.com/KIM-N-KANG/manyak-server/pull/482) 기준선, [#539](https://github.com/KIM-N-KANG/manyak-server/pull/539) 마지막 정리). 이제 위반이 하나라도 생기면 빌드가 실패합니다.
 
 <details>
 <summary><b>리팩터링 예: 의존 방향 뒤집기</b></summary>
@@ -185,11 +185,14 @@ turnCount = storyChatRepository.sumTurnCountByStoryId(story.id),
 // story/service/StoryTurnCounts.kt
 interface StoryTurnCounts {
     fun countByStoryId(storyId: Long): Long
+    // 여러 스토리를 한 번에 세는 메서드는 생략
 }
 
 // chat/service/ChatStoryTurnCounts.kt
 @Component
-class ChatStoryTurnCounts(private val storyChatRepository: StoryChatRepository) : StoryTurnCounts
+class ChatStoryTurnCounts(private val storyChatRepository: StoryChatRepository) : StoryTurnCounts {
+    // chat의 리포지토리로 세는 구현은 생략
+}
 
 // story/service/StoryService.kt
 turnCount = storyTurnCounts.countByStoryId(story.id),
@@ -233,7 +236,7 @@ turnCount = storyTurnCounts.countByStoryId(story.id),
 
 로그에 요청 ID와 트레이스 ID가 함께 남아, 로그 한 줄에서 서버, AI, 알림 서비스까지 이어진 트레이스로 넘어갑니다. 오류는 Sentry, LLM 호출과 비용은 Langfuse, 사용자 행동은 Amplitude로 봅니다.
 
-**진단 에이전트**는 이상 징후가 3분 이어지면 LLM이 읽기 전용 도구로 트레이스, 로그, 메트릭을 조회해 원인을 진단하고 Slack에 보고합니다. 부하 테스트에서 찾은 병목 4건을 재현한 평가에서 3건의 원인을 두 번 모두 맞혔습니다. 진단 한 건의 비용은 $0.1\~0.3입니다.
+**진단 에이전트**는 지표가 기준을 넘어 이상 후보가 생기면 3분 동안 신호를 더 모은 뒤, LLM이 읽기 전용 도구로 트레이스, 로그, 메트릭을 조회해 원인을 진단하고 Slack에 보고합니다. 부하 테스트에서 찾은 병목 4건을 재현한 평가에서 3건의 원인을 두 번 모두 맞혔습니다. 진단 한 건의 비용은 $0.1\~0.3입니다.
 
 <img src="docs/images/admin-ops-storage.png" width="480" alt="관리자 운영 지표 저장소 탭(고정 데이터)">
 
