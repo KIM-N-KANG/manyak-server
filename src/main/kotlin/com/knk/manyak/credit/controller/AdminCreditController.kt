@@ -4,10 +4,12 @@ import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.credit.dto.*
 import com.knk.manyak.credit.service.AdminCreditAdjustmentService
 import com.knk.manyak.credit.service.AdminCreditPolicyService
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import org.springframework.web.bind.annotation.*
 
+@Tag(name = "Admin Credits", description = "관리자 이프 API")
 @RestController
 @RequestMapping("/api/v1/admin/credits")
 class AdminCreditController(

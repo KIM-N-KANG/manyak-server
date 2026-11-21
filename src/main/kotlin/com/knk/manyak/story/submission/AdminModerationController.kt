@@ -3,6 +3,7 @@ package com.knk.manyak.story.submission
 import com.knk.manyak.adminkit.dto.AdminOperationReason
 import com.knk.manyak.adminkit.security.AdminRequester
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import jakarta.validation.constraints.Max
@@ -14,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 import java.util.UUID
 
+@Tag(name = "Admin Moderation", description = "관리자 검수 API")
 @RestController
 @RequestMapping("/api/v1/admin/moderation")
 @SecurityRequirement(name = "bearerAuth")

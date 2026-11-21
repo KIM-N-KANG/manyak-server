@@ -4,10 +4,12 @@ import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.chat.dto.AdminChatModelPromotionRequest
 import com.knk.manyak.chat.dto.AdminChatModelPromotionDeleteRequest
 import com.knk.manyak.chat.service.AdminChatModelService
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import org.springframework.web.bind.annotation.*
 
+@Tag(name = "Admin Chat Models", description = "관리자 채팅 모델 API")
 @RestController
 @RequestMapping("/api/v1/admin/chat-models")
 class AdminChatModelController(private val models: AdminChatModelService) {

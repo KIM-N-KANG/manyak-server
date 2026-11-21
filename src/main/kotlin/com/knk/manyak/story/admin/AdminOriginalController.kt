@@ -2,6 +2,7 @@ package com.knk.manyak.story.admin
 
 import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.story.dto.ImagePresignRequest
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -9,6 +10,7 @@ import org.springframework.web.bind.annotation.*
 import tools.jackson.databind.node.ObjectNode
 import java.util.UUID
 
+@Tag(name = "Admin Originals", description = "관리자 오리지널 스토리 API")
 @RestController
 @RequestMapping("/api/v1/admin/originals")
 class AdminOriginalController(private val originals: AdminOriginalService) {
