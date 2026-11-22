@@ -26,7 +26,7 @@ internal fun infraFullProperties(prometheusUrl: String, timeout: Long = 5) = Inf
     hostAsg = "private-asg", database = "private-db", prometheusUrl = prometheusUrl, prometheusUsername = "private-reader",
     prometheusPassword = "private-password", prometheusAccessClientId = "private-client-id", prometheusAccessClientSecret = "private-client-secret")
 
-/** ADMIN 5-5 홈서버 Prometheus 대역. 질의에 든 기록 규칙 계열로 응답을 고르고 요청을 기록한다. */
+/** ADMIN 5-5 관측 서버 Prometheus 대역. 질의에 든 기록 규칙 계열로 응답을 고르고 요청을 기록한다. */
 internal class PrometheusStub : Dispatcher() {
     val requests = CopyOnWriteArrayList<RecordedRequest>()
     val bodies = ConcurrentHashMap<String, String>()

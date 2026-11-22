@@ -117,7 +117,7 @@ class AiCallRecorderLoggingTests {
 
         val completed = eventsByName()["ai_call_completed"]!!
         // AiCallContext.storyId는 ai_call_logs 컬럼용 내부 PK다. 기존 로그의 story_id는 publicId(UUID)라
-        // 값이 조인되지 않고, 순차 PK가 로그에 노출된다(CLAUDE.md: 외부 노출 식별자는 public_id).
+        // 값이 조인되지 않고, 순차 PK가 로그에 노출된다(AGENTS.md: 외부 노출 식별자는 public_id).
         assertThat(completed).doesNotContainKey("story_id")
         // chat_id는 publicId라 기존 로그와 같은 값으로 조인된다.
         assertThat(completed["chat_id"]).isEqualTo(chatPublicId.toString())

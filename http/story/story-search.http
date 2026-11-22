@@ -1,7 +1,7 @@
 # 일반 제작 준비는 회원 검수 제출(202) → 승인 알림 → 제출본 조회 → 라이브 조회 순서입니다. accessToken이 필요합니다.
 # 공개 스토리 검색(KNK-1141, 저장소 이전과 대체 검색 KNK-2101). IntelliJ HTTP Client에서 위부터 순서대로 실행한다.
 # 사전 준비: Postgres·Redis 기동, ./gradlew bootRun.
-#   검색 저장소는 analysis-nori가 설치된 OpenSearch다. 홈서버에 붙을 때는 MANYAK_OPENSEARCH_ENDPOINT(터널 호스트),
+#   검색 저장소는 analysis-nori가 설치된 OpenSearch다. 검색 서버에 붙을 때는 MANYAK_OPENSEARCH_ENDPOINT(검색 서버 호스트),
 #   MANYAK_OPENSEARCH_USERNAME/PASSWORD(환경별 검색 계정), MANYAK_OPENSEARCH_ACCESS_CLIENT_ID/SECRET(Cloudflare Access 토큰)을
 #   셸 환경에만 넣는다. 값은 이 파일이나 로그에 남기지 않는다. 각 쌍은 둘 다 넣거나 둘 다 비운다(한쪽만 있으면 기동 실패).
 # accessToken은 로그인 검증 파일에서 발급해 client.global.set으로 저장한다.

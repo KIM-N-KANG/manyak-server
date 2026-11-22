@@ -219,7 +219,7 @@ manyak:
     privacy-version: ${MANYAK_LEGAL_PRIVACY_VERSION:v1.8}
   search:
     opensearch:
-      # 홈서버 OpenSearch의 터널 주소(스킴, 경로 없는 호스트, https 443). 관리형 도메인 주소(*.amazonaws.com)면
+      # 검색 서버 OpenSearch 주소(스킴, 경로 없는 호스트, https 443). 관리형 도메인 주소(*.amazonaws.com)면
       # 전환 기간 동안 SigV4로 붙는다(KNK-2101). region은 그 SigV4 경로에서만 쓴다.
       endpoint: ${MANYAK_OPENSEARCH_ENDPOINT:}
       region: ${AWS_REGION:ap-northeast-2}
@@ -303,7 +303,7 @@ manyak:
       # 비어 있으면 AWS 기본 엔드포인트를 쓴다. 운영은 비워 둔다.
       endpoint: ${MANYAK_CHARACTER_IMAGE_ENDPOINT:}
       # 서버 자신의 S3 호출(업로드, HEAD, 복사, 삭제)만 보낼 내부 주소(KNK-2125). 비면 위 endpoint를 쓴다.
-      # presigned URL은 브라우저, 앱, ai가 쓰므로 늘 위 endpoint(공개 주소)로 서명한다. 홈서버 dev는 공개 주소가
+      # presigned URL은 브라우저, 앱, ai가 쓰므로 늘 위 endpoint(공개 주소)로 서명한다. dev 환경은 공개 주소가
       # Cloudflare를 거치는데, Cloudflare가 HEAD를 GET으로 바꿔 서명이 깨져 서버 호출은 http://minio:9000으로 바로 보낸다.
       internal-endpoint: ${MANYAK_CHARACTER_IMAGE_INTERNAL_ENDPOINT:}
   cors:
@@ -381,7 +381,7 @@ manyak:
     # dev/prod는 인프라 적용 후 별도 PR의 Terraform 변경으로 MANYAK_PUSH_MODE=remote를 주입해 전환한다.
     mode: ${MANYAK_PUSH_MODE:local}
     # remote의 브로커: sqs 또는 kafka(KNK-2125). 운영 기본은 sqs이고 local 프로필은 kafka다.
-    # 홈서버 dev는 MANYAK_PUSH_BROKER=kafka와 SPRING_KAFKA_BOOTSTRAP_SERVERS로 Kafka에 발행한다.
+    # dev 환경은 MANYAK_PUSH_BROKER=kafka와 SPRING_KAFKA_BOOTSTRAP_SERVERS로 Kafka에 발행한다.
     broker: ${MANYAK_PUSH_BROKER:sqs}
     # broker=sqs + remote에서 필수. 누락·공백이면 기동에 실패한다.
     queue-url: ${MANYAK_PUSH_QUEUE_URL:}

@@ -13,7 +13,7 @@ import java.util.concurrent.*
 data class InfraPrometheusValues(val hostSystem: InfraHostSystemMetrics, val requests: InfraRequestMetrics, val opensearch: InfraSearchMetrics)
 
 /**
- * 홈서버 Prometheus에서 기록 규칙 계열만 읽는다(ADMIN 4-1-21). 질의는 고정이고 요청 값은 기간과 간격뿐이다.
+ * 관측 서버 Prometheus에서 기록 규칙 계열만 읽는다(ADMIN 4-1-21). 질의는 고정이고 요청 값은 기간과 간격뿐이다.
  * 범위 질의의 점 하나는 그 시각 직전 periodSeconds 동안의 값이라 점의 시각에서 periodSeconds를 빼 구간 시작으로 바꾼다.
  * 질의 하나라도 HTTP 오류, status가 success가 아님, 시간 초과면 이 출처 전체의 실패다.
  */

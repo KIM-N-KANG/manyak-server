@@ -35,7 +35,7 @@ data class StorySearchProperties(
     val accessClientSecret: String = "",
 ) {
     /**
-     * 전환 기간(KNK-2101): terraform이 홈서버 주소로 바꾸기 전까지 dev와 운영은 관리형 도메인을 가리키며 SigV4만 받는다.
+     * 전환 기간(KNK-2101): terraform이 검색 서버 주소로 바꾸기 전까지 dev와 운영은 관리형 도메인을 가리키며 SigV4만 받는다.
      * 주소가 관리형 도메인이면 SigV4로, 아니면 계정과 접근 토큰으로 붙는다. 도메인 삭제 뒤 이 분기와 SigV4 코드를 지운다.
      */
     val awsManaged: Boolean get() = endpoint.trim().endsWith(".amazonaws.com")
@@ -92,7 +92,7 @@ class StorySearchConfig {
             JacksonJsonpMapper(com.fasterxml.jackson.databind.ObjectMapper())
 
         /**
-         * 홈서버 OpenSearch 연결(STORY 6-DEPLOYMENT). 계정은 Basic 헤더로 먼저 보내고(401 왕복 없음),
+         * 검색 서버 OpenSearch 연결(STORY 6-DEPLOYMENT). 계정은 Basic 헤더로 먼저 보내고(401 왕복 없음),
          * Cloudflare Access 서비스 토큰은 `CF-Access-Client-Id`, `CF-Access-Client-Secret` 헤더로 보낸다. 비어 있으면 보내지 않는다.
          */
         fun homeTransport(host: HttpHost, properties: StorySearchProperties): OpenSearchTransport {
