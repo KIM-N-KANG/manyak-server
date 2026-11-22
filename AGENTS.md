@@ -94,11 +94,7 @@
   - SSM 문서 `manyak-prod-host-deploy-server`로 호스트 `deploy.sh`를 부릅니다. 새 컨테이너 헬스 → kamal-proxy 전환 → 옛 컨테이너 드레인(240초) 후 정지입니다. 새 컨테이너가 헬스를 못 넘으면 지워지고 옛 server가 계속 서비스합니다. 출력의 `server: deployed <image>` 줄로 배포를 확인합니다.
   - `api.manyak.app/actuator/health` 스모크가 실패하면 같은 문서를 `image=rollback`으로 보냅니다. 배포가 끝난 뒤에만 `:latest`를 그 SHA로 옮깁니다.
   - 되돌리기는 SSM 문서를 `image=rollback`(직전 이미지, 호스트 `/data/state` 기록) 또는 `image=<ECR 이미지>:<sha7>`로 실행하거나, revert 커밋을 릴리스합니다.
-- **dev push는 홈서버 dev 스택에 반영**됩니다(KNK-2125, manyak-terraform `homeserver/dev`).
-  - 배포 잡(`deploy-dev`)이 최신 SHA 게이트 뒤에서 GHCR `:<sha7>`를 `:dev`로 옮기고 `dev-api.manyak.app` 헬스를 확인합니다. 배포 명령은 보내지 않습니다.
-  - 홈서버 updater가 1분마다 `:dev` 다이제스트를 확인해 바뀌었으면 pull하고 컨테이너를 다시 만듭니다. 교체하는 동안 잠깐 멈춥니다(무중단 아님).
-  - `dev-api`, `dev-cdn`은 Cloudflare 터널로 들어옵니다. dev EC2, SSM 배포, SQS, dev ECR 경로는 없습니다.
-  - 되돌리기는 홈서버 compose에서 server `image`를 불변 태그(`:<sha7>`)로 바꾸고 `docker compose up -d server`를 실행합니다.
+- **dev push는 dev 환경에 반영**됩니다. dev 브랜치에 머지하면 배포 잡(`deploy-dev`)이 최신 SHA 게이트 뒤에서 GHCR `:<sha7>`를 `:dev`로 옮기고, dev 환경이 그 이미지를 자동으로 받아 교체합니다. 주소는 `dev-api.manyak.app`이고, 잡은 그 헬스를 확인합니다. 옛 dev EC2, SSM 배포, SQS, dev ECR 경로는 없습니다.
 - 머지 규칙: 기능→dev = Squash, `release/vX.Y.Z`→main = **Merge Commit**, release→dev = Rebase 역반영, `hotfix/*`→main = **Merge Commit**, hotfix→dev = Rebase(릴리스 역반영과 같음). main과 dev에 직접 push하지 않습니다(관례).
 - 릴리스 절차: dev에서 `release/vX.Y.Z` 분기 → PR 제목 `[KNK-xxx] Release: vX.Y.Z 배포` → 머지 후 `vX.Y.Z` git 태그. `build.gradle.kts` version은 올리지 않습니다(이미지 태그는 git sha 기반).
 - 긴급 수정: 운영 장애나 보안 문제를 바로 고쳐야 하는데 dev에 아직 운영에 내보낼 수 없는 변경이 있을 때만 `origin/main`에서 `hotfix/KNK-xxx-…`로 분기합니다 → PR 제목 `[KNK-xxx] Hotfix: vX.Y.Z 배포` → main 머지 후 patch 태그 → 곧바로 같은 브랜치를 dev에 반영. 그런 변경이 없으면 위 릴리스 절차로 patch를 냅니다. ([운영 긴급 수정](../knk-harness/docs/operations/DEPLOYMENT.md#7-3-운영-긴급-수정))
@@ -113,4 +109,3 @@
 - 이 레포에서 알아야 할 최소한: **인프라 정의 변경은 앱 레포 배포 잡으로 반영되지 않고 terraform apply가 필요**합니다.
   - 운영 컨테이너 환경변수, 시크릿 참조, 헬스체크는 manyak-terraform `envs/prod/app-host.tf`의 `app_host_defs`가 정본입니다. terraform이 호스트 설정(S3)으로 내려보내고, 배포 잡은 이미지 태그만 바꿉니다.
   - 설정을 바꾼 apply는 다음 배포 때(또는 SSM 문서 `image=current`로 다시 배포할 때) 반영되므로 **apply는 반드시 해당 코드의 main 릴리스 후에** 합니다.
-  - dev 컨테이너 설정은 manyak-terraform `homeserver/dev`의 `compose.yaml`과 홈서버의 `secrets/server.env`(레포에 없음)에 있습니다. terraform apply 대상이 아닙니다.
