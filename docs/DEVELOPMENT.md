@@ -152,7 +152,7 @@ brew install tbls          # 최초 1회
 
 - 팀 위키: `../llm-wiki`
 - 팀 LLM 하네스: `../knk-harness`
-- 서버 레포 LLM 지침: `CLAUDE.md`
+- 서버 레포 LLM 지침: `AGENTS.md`
 
 ## 기능 메모
 

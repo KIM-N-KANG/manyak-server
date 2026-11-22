@@ -201,7 +201,7 @@ jobs:
           push: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
           tags: ${{ steps.image-tags.outputs.tags }}
 
-  # dev 푸시(GHCR 갱신) 후 → dev 앱 호스트(EC2 한 대)에 무중단 교체 배포 + 헬스 스모크 (KNK-829, KNK-2102)
+  # dev 푸시(GHCR 갱신) 후 → :dev 승격 + 헬스 스모크. dev 서버는 홈서버 updater가 :dev를 받아 교체한다 (KNK-829, KNK-2125)
   deploy-dev:
     name: Deploy to app host (dev)
     needs: build
