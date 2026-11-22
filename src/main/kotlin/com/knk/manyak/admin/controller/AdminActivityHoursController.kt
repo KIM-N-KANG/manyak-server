@@ -4,6 +4,7 @@ import com.knk.manyak.admin.dto.AdminChartsRequest
 import com.knk.manyak.admin.service.AdminActivityHoursService
 import com.knk.manyak.global.config.OpenApiConfig
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import org.springdoc.core.annotations.ParameterObject
 import org.springframework.web.bind.annotation.GetMapping
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.ModelAttribute
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
+@Tag(name = "Admin User Metrics", description = "관리자 회원 지표 API")
 @RestController
 @RequestMapping("/api/v1/admin/users")
 @SecurityRequirement(name = OpenApiConfig.SECURITY_SCHEME_NAME)

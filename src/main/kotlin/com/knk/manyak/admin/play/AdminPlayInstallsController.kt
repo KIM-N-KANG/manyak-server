@@ -4,10 +4,12 @@ import com.knk.manyak.global.config.OpenApiConfig
 import com.knk.manyak.global.error.ApiErrorResponse
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
+@Tag(name = "Admin Dashboard", description = "관리자 대시보드 API")
 @RestController
 @RequestMapping("/api/v1/admin/dashboard")
 class AdminPlayInstallsController(private val service: AdminPlayInstallsService) {

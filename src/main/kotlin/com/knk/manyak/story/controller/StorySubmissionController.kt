@@ -3,10 +3,12 @@ package com.knk.manyak.story.controller
 import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.story.dto.CreateGeneralStoryRequest
 import com.knk.manyak.story.submission.StorySubmissionService
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.web.bind.annotation.*
 import org.springframework.http.HttpStatus
 import org.springframework.web.server.ResponseStatusException
 
+@Tag(name = "Story Submissions", description = "스토리 검수 제출 API")
 @RestController
 @RequestMapping("/api/v1/stories/submissions")
 class StorySubmissionController(private val service: StorySubmissionService) {

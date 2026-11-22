@@ -8,11 +8,13 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse
 import io.swagger.v3.oas.annotations.responses.ApiResponses
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.security.SecurityRequirements
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RestController
 
+@Tag(name = "Webhooks", description = "외부 결제 웹훅 API")
 @RestController
 class GrobleWebhookController(private val webhook: GrobleWebhookService) {
     @Operation(summary = "그로블 결제 웹훅 수신", description = "raw body HMAC 검증 후 결제 적립·환불 회수를 처리합니다. 타임스탬프·서명 오류 401, JSON 오류 400, 시크릿 미설정 503.")

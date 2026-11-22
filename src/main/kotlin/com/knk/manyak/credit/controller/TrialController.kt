@@ -5,10 +5,12 @@ import com.knk.manyak.credit.service.GuestTrialLimitService
 import com.knk.manyak.credit.service.GuestTrialLimitService.Counter
 import com.knk.manyak.global.security.CurrentUserId
 import io.swagger.v3.oas.annotations.Operation
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RestController
 
+@Tag(name = "Credits", description = "이프 API")
 @RestController
 class TrialController(private val trials: GuestTrialLimitService) {
     @Operation(summary = "체험 사용량·한도 조회", description = "인증 선택. 게스트는 X-Manyak-Device-Id 필수. 회원 스토리라인과 LITE 무료 프로모션 진행 중 회원 chatTurn의 limit은 null(무제한).")
