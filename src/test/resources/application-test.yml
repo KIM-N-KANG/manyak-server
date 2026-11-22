@@ -78,7 +78,7 @@ manyak:
     chat:
       stub: true
   cors:
-    allowed-origins: http://localhost:3000,http://192.168.0.12:3000
+    allowed-origins: http://localhost:3000,http://10.0.0.12:3000
   credit:
     policy-refresh:
       # 정책 주기 갱신 스케줄러를 끈다. 테스트는 오버라이드를 넣은 뒤 CreditPolicyService.refresh()를 직접

@@ -37,7 +37,7 @@ class S3UploadedImageStorageTests {
     }
 
     // 서버 자신의 S3 호출(HEAD, 복사)은 내부 주소로 바로 간다. presigned URL은 브라우저와 앱이 쓰는 공개 주소로 서명한다.
-    // 홈서버 dev(KNK-2125)에서 공개 주소는 Cloudflare를 거치는데, Cloudflare가 HEAD를 GET으로 바꿔 서명이 깨졌다.
+    // dev 환경(KNK-2125)에서 공개 주소는 Cloudflare를 거치는데, Cloudflare가 HEAD를 GET으로 바꿔 서명이 깨졌다.
     @Test
     fun `내부 엔드포인트가 있으면 서버 S3 호출만 그 주소로 간다`() {
         val storage = EndpointProbe(endpoint = "https://dev-s3.example.test", internalEndpoint = "http://minio:9000")

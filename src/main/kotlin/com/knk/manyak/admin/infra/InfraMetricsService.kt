@@ -6,7 +6,7 @@ import java.time.*
 import java.util.concurrent.*
 
 /**
- * 인프라 지표(ADMIN 4-1-21). CloudWatch, 홈서버 Prometheus, Redis를 나란히 부르고 합쳐 5초 한도를 둔다.
+ * 인프라 지표(ADMIN 4-1-21). CloudWatch, 관측 서버 Prometheus, Redis를 나란히 부르고 합쳐 5초 한도를 둔다.
  * 실패는 출처마다 따로 판정해 그 출처의 묶음만 비운다. 부른 출처가 모두 실패하면 만료된 캐시나 사용 불가이며 60초 쿨다운을 건다.
  */
 @Service
