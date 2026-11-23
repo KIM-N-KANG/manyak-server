@@ -263,6 +263,8 @@ class SecurityFilterChainGuardIntegrationTests : IntegrationTest() {
             // 토큰을 읽는 permitAll: 토큰 없으면 통과, 무효 토큰이면 리소스 서버가 401.
             route(HttpMethod.GET, "/actuator/health", skipsBearer = false),
             route(HttpMethod.GET, "/actuator/health/liveness", skipsBearer = false),
+            // 배포된 커밋을 공개 주소로 확인한다(KNK-2126). 노출 목록은 health, info뿐이다.
+            route(HttpMethod.GET, "/actuator/info", skipsBearer = false),
             route(HttpMethod.GET, "/v3/api-docs", skipsBearer = false),
             route(HttpMethod.GET, "/v3/api-docs/swagger-config", skipsBearer = false),
             route(HttpMethod.GET, "/swagger-ui/index.html", skipsBearer = false),
