@@ -61,6 +61,9 @@ class SecurityConfig {
                     .requestMatchers(
                         "/actuator/health",
                         "/actuator/health/**",
+                        // 빌드 정보와 커밋(KNK-2126). CI가 배포된 커밋을 공개 주소로 확인한다. env, java 같은 다른 info 기여자는
+                        // 기본으로 꺼져 있어 build 절만 나간다.
+                        "/actuator/info",
                         "/v3/api-docs",
                         "/v3/api-docs/**",
                         "/swagger-ui/**",

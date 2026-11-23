@@ -181,3 +181,26 @@ tasks.bootJar {
         attributes("Enable-Native-Access" to "ALL-UNNAMED")
     }
 }
+
+// /actuator/info의 build 절(KNK-2126). OCI 운영 호스트는 호스트가 이미지를 받아 배포하므로 CI가 공개 info의 커밋으로
+// 배포 완료를 확인한다. 커밋은 CI의 GITHUB_SHA, 없으면 로컬 git HEAD, .git이 없는 소스 복사 빌드(docker의 runtime
+// 단계)는 unknown이다. 빌드 시각은 Spring Boot 기본값대로 함께 들어간다.
+val buildCommit: Provider<String> = providers.environmentVariable("GITHUB_SHA").orElse(
+    if (file(".git").exists()) {
+        providers.exec {
+            commandLine("git", "rev-parse", "HEAD")
+            isIgnoreExitValue = true
+        }.standardOutput.asText.map { it.trim() }
+    } else {
+        providers.provider { "" }
+    },
+).map { it.ifBlank { "unknown" } }
+
+springBoot {
+    buildInfo {
+        properties {
+            artifact.set("manyak-server")
+            additional.put("commit", buildCommit)
+        }
+    }
+}
