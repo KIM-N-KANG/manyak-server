@@ -4,9 +4,11 @@ import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.global.security.requireUser
 import com.knk.manyak.auth.dto.*
 import com.knk.manyak.auth.service.UserPersonaService
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 
+@Tag(name = "Personas", description = "페르소나 API")
 @RestController
 @RequestMapping("/api/v1/users/me/personas")
 class UserPersonaController(private val service: UserPersonaService) {

@@ -22,11 +22,12 @@ import java.util.Base64
 import java.util.concurrent.*
 
 /** 운영과 같은 구성. 이름과 비밀값은 응답과 로그에 나오면 안 되는 표식이다. */
-internal fun infraFullProperties(prometheusUrl: String, timeout: Long = 5) = InfraMetricsProperties(timeoutSeconds = timeout,
+internal fun infraFullProperties(prometheusUrl: String, timeout: Long = 5, hostSource: InfraHostSource = InfraHostSource.CLOUDWATCH) =
+    InfraMetricsProperties(timeoutSeconds = timeout, hostSource = hostSource,
     hostAsg = "private-asg", database = "private-db", prometheusUrl = prometheusUrl, prometheusUsername = "private-reader",
     prometheusPassword = "private-password", prometheusAccessClientId = "private-client-id", prometheusAccessClientSecret = "private-client-secret")
 
-/** ADMIN 5-5 홈서버 Prometheus 대역. 질의에 든 기록 규칙 계열로 응답을 고르고 요청을 기록한다. */
+/** ADMIN 5-5 관측 서버 Prometheus 대역. 질의에 든 기록 규칙 계열로 응답을 고르고 요청을 기록한다. */
 internal class PrometheusStub : Dispatcher() {
     val requests = CopyOnWriteArrayList<RecordedRequest>()
     val bodies = ConcurrentHashMap<String, String>()
@@ -35,7 +36,7 @@ internal class PrometheusStub : Dispatcher() {
         requests += request
         failure?.invoke(request)?.let { return it }
         val url = request.requestUrl!!
-        val series = SERIES.first { url.queryParameter("query")!!.contains(it) }
+        val series = (SERIES + HOST_DB_SERIES).first { url.queryParameter("query")!!.contains(it) }
         val body = bodies[series] ?: if (url.encodedPath.endsWith("query_range")) {
             matrix(mapOf<String, String>() to listOf(Instant.ofEpochSecond(url.queryParameter("start")!!.toDouble().toLong()) to DEFAULTS.getValue(series)))
         } else vector(mapOf<String, String>() to DEFAULTS.getValue(series))
@@ -46,8 +47,13 @@ internal class PrometheusStub : Dispatcher() {
             "manyak_prod_host:memory_available_bytes", "manyak_prod_host:memory_total_bytes", "manyak_prod_host:disk_available_bytes",
             "manyak_prod_host:disk_total_bytes", "manyak_opensearch:disk_available_bytes", "manyak_opensearch:disk_total_bytes",
             "manyak_opensearch:jvm_memory_pressure_percent", "manyak_opensearch:cluster_status")
+        /** 운영 호스트 지표 출처가 Prometheus일 때(host-source=prometheus)만 더 읽는 계열(KNK-2126, OCI 운영 호스트). */
+        val HOST_DB_SERIES = listOf("manyak_prod_host:cpu_usage_percent", "manyak_prod_host:status_check_failed", "manyak_prod_db:cpu_percent",
+            "manyak_prod_db:free_storage_bytes", "manyak_prod_db:connections", "manyak_prod_db:read_latency_seconds", "manyak_prod_db:write_latency_seconds")
         val DEFAULTS = mapOf(SERIES[0] to "312", SERIES[1] to "1", SERIES[2] to "182", SERIES[3] to "1876000000", SERIES[4] to "4015000000",
-            SERIES[5] to "15400000000", SERIES[6] to "21462000000", SERIES[7] to "114949550080", SERIES[8] to "137170518016", SERIES[9] to "9", SERIES[10] to "0")
+            SERIES[5] to "15400000000", SERIES[6] to "21462000000", SERIES[7] to "114949550080", SERIES[8] to "137170518016", SERIES[9] to "9", SERIES[10] to "0",
+            HOST_DB_SERIES[0] to "4.1", HOST_DB_SERIES[1] to "0", HOST_DB_SERIES[2] to "2.5", HOST_DB_SERIES[3] to "38000000000",
+            HOST_DB_SERIES[4] to "17", HOST_DB_SERIES[5] to "0.0008", HOST_DB_SERIES[6] to "0.0016")
         fun matrix(vararg series: Pair<Map<String, String>, List<Pair<Instant, String>>>) = """{"status":"success","data":{"resultType":"matrix","result":[""" +
             series.joinToString(",") { (labels, points) -> """{"metric":${labels(labels)},"values":[${points.joinToString(",") { "[${it.first.epochSecond},\"${it.second}\"]" }}]}""" } + "]}}"
         fun vector(vararg series: Pair<Map<String, String>, String>) = """{"status":"success","data":{"resultType":"vector","result":[""" +
@@ -233,6 +239,55 @@ class InfraMetricsServiceTests {
             assertThat(f.service.metrics(InfraMetricsQuery()).opensearch!!.status).isEqualTo(expected)
             f.clock.at = f.clock.at.plusSeconds(61)
         }
+    }
+
+    @Test fun `'Prometheus 출처' host-source가 prometheus면 CloudWatch를 부르지 않고 host와 rds를 기록 규칙 계열로 채운다`(): Unit =
+        InfraFixture({ infraFullProperties(it, hostSource = InfraHostSource.PROMETHEUS) }).use { f ->
+            val result = f.service.metrics(InfraMetricsQuery())
+            verifyNoInteractions(f.cw)
+            assertThat(result.unavailable).isEmpty()
+            val host = result.host!!; val rds = result.rds!!
+            assertThat(host.cpu.single()).isEqualTo(InfraMetricPoint(since, 4.1)); assertThat(host.cpuMax.single().value).isEqualTo(4.1)
+            assertThat(host.cpuCreditBalance).isEmpty(); assertThat(host.statusCheckFailed.single().value).isEqualTo(0.0)
+            assertThat(rds.cpu.single().value).isEqualTo(2.5); assertThat(rds.freeStorageBytes.single().value).isEqualTo(38000000000.0)
+            assertThat(rds.connections.single().value).isEqualTo(17.0)
+            assertThat(rds.readLatencyMs.single().value).isCloseTo(0.8, within(1e-9)); assertThat(rds.writeLatencyMs.single().value).isCloseTo(1.6, within(1e-9))
+            assertThat(listOf(result.hostSystem, result.requests, result.redis, result.opensearch)).doesNotContainNull()
+            val queries = f.prometheus.requests.map { it.param("query")!! }
+            assertThat(queries).hasSize(19).noneMatch { it.contains("{") }
+            assertThat(queries).contains(
+                "max(avg_over_time(manyak_prod_host:cpu_usage_percent[300s]))", "max(max_over_time(manyak_prod_host:cpu_usage_percent[300s]))",
+                "max(max_over_time(manyak_prod_host:status_check_failed[300s]))", "max(avg_over_time(manyak_prod_db:cpu_percent[300s]))",
+                "min(min_over_time(manyak_prod_db:free_storage_bytes[300s]))", "max(max_over_time(manyak_prod_db:connections[300s]))",
+                "max(avg_over_time(manyak_prod_db:read_latency_seconds[300s]))", "max(avg_over_time(manyak_prod_db:write_latency_seconds[300s]))")
+            assertThat(f.prometheus.requests.filter { it.requestUrl!!.encodedPath == "/api/v1/query_range" }).hasSize(15).allMatch { it.param("step") == "300" }
+        }
+
+    @Test fun `'Prometheus 출처'의 실패 Prometheus가 500이면 host와 rds도 비우고 unavailable에 넣는다`(): Unit = infraLogs { logs ->
+        InfraFixture({ infraFullProperties(it, hostSource = InfraHostSource.PROMETHEUS) }).use { f ->
+            f.prometheus.failure = { if (it.param("query")!!.contains("manyak_prod_db:connections")) MockResponse().setResponseCode(500) else null }
+            val result = f.service.metrics(InfraMetricsQuery())
+            assertThat(result.unavailable).containsExactly("host", "hostSystem", "requests", "rds", "opensearch")
+            assertThat(listOf(result.host, result.hostSystem, result.requests, result.rds, result.opensearch)).containsOnlyNulls()
+            assertThat(result.redis).isNotNull(); verifyNoInteractions(f.cw)
+            assertThat(logs.list.map { it.formattedMessage }).containsExactly("admin_infra_metrics_fetch_failed reason=prometheus_error service=prometheus error_code=500")
+        }
+    }
+
+    @Test fun `'Prometheus 출처'의 설정 없음 조회 주소가 비면 host와 rds도 null이고 아무 출처도 부르지 않는다`(): Unit =
+        InfraFixture({ infraFullProperties("", hostSource = InfraHostSource.PROMETHEUS) }).use { f ->
+            val result = f.service.metrics(InfraMetricsQuery())
+            assertThat(listOf(result.host, result.hostSystem, result.requests, result.rds, result.opensearch)).containsOnlyNulls()
+            assertThat(result.unavailable).isEmpty(); assertThat(result.redis).isNotNull()
+            verifyNoInteractions(f.cw); assertThat(f.prometheus.requests).isEmpty()
+        }
+
+    @Test fun `출처 설정은 기본 cloudwatch이고 prometheus를 받는다`() {
+        fun bind(vararg pairs: Pair<String, String>) = org.springframework.boot.context.properties.bind.Binder(
+            org.springframework.boot.context.properties.source.MapConfigurationPropertySource(mapOf(*pairs)))
+            .bindOrCreate("manyak.admin.infra", InfraMetricsProperties::class.java)
+        assertThat(bind().hostSource).isEqualTo(InfraHostSource.CLOUDWATCH)
+        assertThat(bind("manyak.admin.infra.host-source" to "prometheus").hostSource).isEqualTo(InfraHostSource.PROMETHEUS)
     }
 
     @Test fun `'Redis 값' 대역의 다섯 값을 그대로 담는다`(): Unit = InfraFixture().use { f ->

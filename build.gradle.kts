@@ -4,6 +4,7 @@ plugins {
     id("org.springframework.boot") version "4.1.2"
     id("io.spring.dependency-management") version "1.1.7"
     kotlin("plugin.jpa") version "2.3.21"
+    jacoco
 }
 
 group = "com.knk"
@@ -154,11 +155,52 @@ tasks.withType<Test> {
     systemProperty("reactor.netty.pool.maxIdleTime", "0")
 }
 
+// 테스트 커버리지(KNK-2119). test가 끝나면 보고서(XML은 CI 잡 요약, HTML은 사람이 보는 용도)를 만든다.
+// toolVersion은 Java 25 클래스 파일을 지원하는 0.8.14로 고정한다(Gradle 기본값보다 새 버전). 측정 대상에서 빼는 클래스는 없다.
+jacoco {
+    toolVersion = "0.8.14"
+}
+
+tasks.test {
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required = true
+        html.required = true
+    }
+}
+
 tasks.bootJar {
     archiveFileName.set("app.jar")
     // Java 24부터 클래스패스 코드의 네이티브 호출(Netty의 System.loadLibrary)에 JEP 472 경고가 나온다.
     // `java -jar`로 띄우는 실행 jar는 이 매니페스트 속성으로 플래그 없이 허용한다(ALL-UNNAMED만 가능). Java 21은 이 속성을 무시한다(KNK-2095).
     manifest {
         attributes("Enable-Native-Access" to "ALL-UNNAMED")
+    }
+}
+
+// /actuator/info의 build 절(KNK-2126). OCI 운영 호스트는 호스트가 이미지를 받아 배포하므로 CI가 공개 info의 커밋으로
+// 배포 완료를 확인한다. 커밋은 CI의 GITHUB_SHA, 없으면 로컬 git HEAD, .git이 없는 소스 복사 빌드(docker의 runtime
+// 단계)는 unknown이다. 빌드 시각은 Spring Boot 기본값대로 함께 들어간다.
+val buildCommit: Provider<String> = providers.environmentVariable("GITHUB_SHA").orElse(
+    if (file(".git").exists()) {
+        providers.exec {
+            commandLine("git", "rev-parse", "HEAD")
+            isIgnoreExitValue = true
+        }.standardOutput.asText.map { it.trim() }
+    } else {
+        providers.provider { "" }
+    },
+).map { it.ifBlank { "unknown" } }
+
+springBoot {
+    buildInfo {
+        properties {
+            artifact.set("manyak-server")
+            additional.put("commit", buildCommit)
+        }
     }
 }

@@ -4,12 +4,14 @@ import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.push.dto.*
 import com.knk.manyak.push.service.AdminCampaignService
 import com.knk.manyak.push.service.AdminPushTemplateService
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
 
+@Tag(name = "Admin Push", description = "관리자 푸시 발송 API")
 @RestController
 @RequestMapping("/api/v1/admin/push")
 class AdminPushController(private val campaigns: AdminCampaignService, private val templates: AdminPushTemplateService) {

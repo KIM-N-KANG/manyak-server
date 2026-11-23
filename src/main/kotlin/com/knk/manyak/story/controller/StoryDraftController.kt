@@ -3,10 +3,12 @@ package com.knk.manyak.story.controller
 import com.knk.manyak.global.security.CurrentUserId
 import com.knk.manyak.story.draft.PutStoryDraftRequest
 import com.knk.manyak.story.draft.StoryDraftService
+import io.swagger.v3.oas.annotations.tags.Tag
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
 
+@Tag(name = "Story Drafts", description = "스토리 제작 초안 API")
 @RestController
 @RequestMapping("/api/v1/users/me/story-drafts")
 class StoryDraftController(private val service: StoryDraftService) {

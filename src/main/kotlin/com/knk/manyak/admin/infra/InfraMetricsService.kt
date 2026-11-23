@@ -6,7 +6,8 @@ import java.time.*
 import java.util.concurrent.*
 
 /**
- * 인프라 지표(ADMIN 4-1-21). CloudWatch, 홈서버 Prometheus, Redis를 나란히 부르고 합쳐 5초 한도를 둔다.
+ * 인프라 지표(ADMIN 4-1-21). CloudWatch, 관측 서버 Prometheus, Redis를 나란히 부르고 합쳐 5초 한도를 둔다.
+ * host와 rds의 출처는 설정(hostSource)이 고른다. PROMETHEUS면 CloudWatch를 부르지 않고 그 두 묶음도 Prometheus 출처에 묶인다(KNK-2126).
  * 실패는 출처마다 따로 판정해 그 출처의 묶음만 비운다. 부른 출처가 모두 실패하면 만료된 캐시나 사용 불가이며 60초 쿨다운을 건다.
  */
 @Service
@@ -51,7 +52,9 @@ class InfraMetricsService(private val cloudwatch: CloudWatchInfraClient, private
     private fun fetch(range: InfraRange): InfraMetricsResponse? {
         val deadline = System.nanoTime() + Duration.ofSeconds(properties.timeoutSeconds).toNanos()
         val now = clock.instant()
-        val queries = catalog.queries(range.periodSeconds)
+        val cloudwatchHost = properties.hostSource == InfraHostSource.CLOUDWATCH
+        val prometheusHost = !cloudwatchHost && properties.prometheusUrl.isNotBlank()
+        val queries = if (cloudwatchHost) catalog.queries(range.periodSeconds) else emptyList()
         val cw = queries.takeIf { it.isNotEmpty() }?.let { submit { cloudwatch.fetch(it, range.since, range.until, deadline) } }
         val pm = properties.prometheusUrl.takeIf { it.isNotBlank() }?.let { submit { prometheus.fetch(range, now, deadline) } }
         val rd = submit { redis.fetch() }
@@ -67,13 +70,13 @@ class InfraMetricsService(private val cloudwatch: CloudWatchInfraClient, private
         fun points(id: String, factor: Double = 1.0) = series!!.value!!.getValue(id).map { InfraMetricPoint(it.at, it.value * factor) }
         val cloud = series?.value != null
         val host = if (cloud && properties.hostAsg.isNotBlank()) InfraHostMetrics(points("host_cpu"), points("host_cpu_max"),
-            points("host_cpu_credit"), points("host_status")) else null
+            points("host_cpu_credit"), points("host_status")) else values?.value?.host
         val rds = if (cloud && properties.database.isNotBlank()) InfraRdsMetrics(points("rds_cpu"), points("rds_storage"),
-            points("rds_connections"), points("rds_read_latency", 1000.0), points("rds_write_latency", 1000.0)) else null
+            points("rds_connections"), points("rds_read_latency", 1000.0), points("rds_write_latency", 1000.0)) else values?.value?.rds
         val unavailable = buildList {
-            if (series?.failure != null && properties.hostAsg.isNotBlank()) add("host")
+            if ((series?.failure != null && properties.hostAsg.isNotBlank()) || (prometheusHost && values?.failure != null)) add("host")
             if (values?.failure != null) addAll(listOf("hostSystem", "requests"))
-            if (series?.failure != null && properties.database.isNotBlank()) add("rds")
+            if ((series?.failure != null && properties.database.isNotBlank()) || (prometheusHost && values?.failure != null)) add("rds")
             if (current.failure != null) add("redis")
             if (values?.failure != null) add("opensearch")
         }

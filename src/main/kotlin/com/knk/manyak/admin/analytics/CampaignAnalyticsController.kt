@@ -2,11 +2,13 @@ package com.knk.manyak.admin.analytics
 
 import com.knk.manyak.global.error.ApiErrorResponse
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.servlet.http.HttpServletRequest
 import org.springdoc.core.annotations.ParameterObject
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
+@Tag(name = "Admin Campaigns", description = "관리자 캠페인 분석 API")
 @RestController
 @RequestMapping("/api/v1/admin/campaigns")
 @SecurityRequirement(name = "bearerAuth")

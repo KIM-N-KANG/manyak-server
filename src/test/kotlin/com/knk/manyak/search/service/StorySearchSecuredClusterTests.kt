@@ -29,9 +29,9 @@ import java.net.ServerSocket
 import java.time.Duration
 import java.util.UUID
 
-/** 홈서버처럼 보안 플러그인을 켠 OpenSearch에 계정으로 붙는 것과, 저장소 장애 때 대체 검색까지 걸리는 시간을 확인한다(KNK-2101). */
+/** 검색 서버처럼 보안 플러그인을 켠 OpenSearch에 계정으로 붙는 것과, 저장소 장애 때 대체 검색까지 걸리는 시간을 확인한다(KNK-2101). */
 @EnabledIf("dockerAvailable")
-class StorySearchHomeServerTests {
+class StorySearchSecuredClusterTests {
     private fun properties(username: String = "admin", password: String = PASSWORD) =
         StorySearchProperties(storyIndex = "stories-home-test", username = username, password = password)
 
@@ -44,7 +44,7 @@ class StorySearchHomeServerTests {
             val index = properties().storyIndex
             client.indices().create(StorySearchIndexAdmin.createRequest(index, standardAnalyzer = true))
             val id = UUID.randomUUID().toString()
-            client.index { it.index(index).id(id).document(StorySearchDocument(publicId = id, title = "홈서버 왕국", visible = true)) }
+            client.index { it.index(index).id(id).document(StorySearchDocument(publicId = id, title = "검색 서버 왕국", visible = true)) }
             client.indices().refresh { it.index(index) }
             assertThat(client.count { it.index(index) }.count()).isEqualTo(1)
         }
@@ -125,7 +125,7 @@ class StorySearchHomeServerTests {
         @JvmStatic
         fun dockerAvailable(): Boolean = DockerClientFactory.instance().isDockerAvailable
 
-        // 보안 플러그인은 켜고 HTTP TLS만 끈다. 홈서버는 TLS를 Cloudflare 터널이 맡는다.
+        // 보안 플러그인은 켜고 HTTP TLS만 끈다. 검색 서버는 TLS를 앞단 프록시가 맡는다.
         private val lazyContainer = lazy {
             GenericContainer("opensearchproject/opensearch:2.19.4")
                 .withEnv("discovery.type", "single-node")

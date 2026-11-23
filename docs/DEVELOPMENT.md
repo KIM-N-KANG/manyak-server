@@ -1,0 +1,188 @@
+# 개발 가이드
+
+manyak-server를 로컬에서 실행하고 설정하는 방법입니다. 프로젝트 소개는 [README](../README.md)에 있습니다.
+
+## 로컬 실행
+
+PostgreSQL과 Redis를 실행합니다.
+
+```bash
+docker compose up -d
+```
+
+서버를 실행합니다. Gradle은 `.env`를 읽지 않으므로 값을 셸에 먼저 올립니다(아래 [환경변수](#환경변수)).
+
+```bash
+set -a; source .env; set +a
+./gradlew bootRun
+```
+
+테스트를 실행합니다.
+
+```bash
+./gradlew test
+```
+
+## 로컬 관측 스택(선택)
+
+로그 파이프라인(Fluent Bit → OpenSearch)을 학습하거나 검증할 때만 실행합니다. 평소 개발에는 필요 없습니다.
+
+```bash
+docker compose -f docker-compose.observability.yml up -d
+```
+
+- OpenSearch: <http://localhost:9200>
+- OpenSearch Dashboards: <http://localhost:5601>
+
+멈출 때는 `down`을 씁니다. 색인 데이터까지 지우려면 `down -v`를 씁니다.
+
+```bash
+docker compose -f docker-compose.observability.yml down
+```
+
+이 스택은 `manyak-observability` 프로젝트로 분리돼 있어 평소 개발용 `docker compose up -d`(PostgreSQL, Redis)에 영향을 주지 않습니다. 보안 플러그인을 끈 **로컬 학습 전용** 구성입니다. 운영에는 쓰지 않습니다.
+
+### 대화 요약 결과 지표
+
+`manyak.chat.compact.result` Counter는 `outcome` 태그로 `saved`, `discarded`, `failed`, `disabled`를 집계합니다. 저장, 폐기, 실패는 기존 `chat_compact_*` 결과 로그와 같은 시점에 1 증가합니다.
+
+`MANYAK_CHAT_COMPACT_ENABLED=false`이면 이어쓰기 커밋의 완료 턴 수가 `MANYAK_CHAT_COMPACT_INTERVAL_TURNS`(기본 10)의 배수일 때만 `disabled`가 1 증가합니다. 재생성과 롤백은 세지 않으며 요약을 요청하지 않습니다. 첫 증가도 감지하도록 기동 시 `disabled` 시계열을 0으로 등록합니다. 지표 전송을 켠 환경에서만 OTLP로 내보냅니다.
+
+## 환경변수
+
+로컬 실행에도 DB 접속 환경변수가 필요합니다. 필요한 변수 목록은 `.env.example`에 있습니다. 처음에는 이 파일을 `.env`로 복사해 값을 채웁니다.
+
+`docker compose`는 현재 디렉터리의 `.env` 파일을 자동으로 읽습니다. Spring Boot를 IntelliJ에서 실행할 때는 Run Configuration의 Environment variables에 값을 직접 넣습니다.
+
+필요한 환경변수는 다음과 같습니다.
+
+```bash
+MANYAK_DB_NAME=<DB 이름>
+MANYAK_DB_PORT=<로컬 DB 포트>
+MANYAK_DB_URL=jdbc:postgresql://localhost:<MANYAK_DB_PORT>/<MANYAK_DB_NAME>
+MANYAK_DB_USERNAME=<DB 사용자>
+MANYAK_DB_PASSWORD=<DB 비밀번호>
+MANYAK_REDIS_PORT=6379
+MANYAK_AI_BASE_URL=http://localhost:8000
+MANYAK_CORS_ALLOWED_ORIGINS=http://localhost:3000
+MANYAK_SLACK_FEEDBACK_WEBHOOK_URL=https://hooks.slack.com/services/T000/B000/XXXX
+MANYAK_ANALYTICS_DEVICE_ID_PEPPER=optional-random-pepper
+MANYAK_ANALYTICS_AMPLITUDE_ENABLED=false
+MANYAK_AMPLITUDE_API_KEY=optional-amplitude-project-key
+```
+
+`MANYAK_AI_BASE_URL`에는 반드시 `http://` 또는 `https://` scheme까지 포함합니다.
+`MANYAK_CORS_ALLOWED_ORIGINS`는 쉼표로 구분하며, 각 origin에는 scheme과 port를 포함합니다. 같은 네트워크의 다른 기기에서 웹을 실행하면 그 주소도 넣습니다.
+`MANYAK_SLACK_FEEDBACK_WEBHOOK_URL`은 선택값입니다. 값을 넣으면 피드백이 등록될 때 그 Slack Incoming Webhook으로 알림을 보냅니다. 비워 두면 알림만 건너뛰고 등록은 정상으로 처리합니다.
+`MANYAK_ANALYTICS_DEVICE_ID_PEPPER`은 선택값입니다. `device_id` 해시에 섞는 pepper입니다. 값을 넣으면 ID 추측 공격이 어려워집니다. 비워 두면 무염 해시를 씁니다. 전환기에는 구 `MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER`도 대체값으로 인식합니다(KNK-317).
+`MANYAK_ANALYTICS_AMPLITUDE_ENABLED`와 `MANYAK_AMPLITUDE_API_KEY`는 서버 분석 이벤트(`server_*`)의 Amplitude 발행 설정입니다(B1, KNK-514). 기본값은 off입니다. `ENABLED=true`이고 API 키가 있을 때만 발행합니다. 그 밖에는 발행 파사드가 아무 일도 하지 않습니다. 그래서 로컬, 테스트, 키를 넣지 않은 환경에서는 발행이 꺼집니다. 리전이 EU면 `MANYAK_AMPLITUDE_BASE_URL=https://api.eu.amplitude.com`으로 바꿉니다.
+`MANYAK_REDIS_PORT`은 로컬 Redis 컨테이너가 게시할 포트입니다(기본 `6379`). 앱은 기본적으로 `localhost:6379`에 연결합니다. `SPRING_DATA_REDIS_HOST`와 `SPRING_DATA_REDIS_PORT`로 주소와 포트를 바꿀 수 있습니다. 배포 환경에서는 두 값에 그 환경의 Redis 주소와 포트를 넣습니다.
+
+`MANYAK_PUSH_WEB_BASE_URL`은 스토리 완성과 출석 리마인드 푸시의 `deepLink`에 쓸 웹 주소입니다(기본 `https://manyak.app`). 개발 웹 주소가 필요하면 이 값으로 바꿉니다. 로컬 발송기는 `deepLink`가 없을 때 이 주소를 웹 클릭 링크로 씁니다. 아이콘 주소는 `MANYAK_PUSH_WEB_ICON_URL`입니다. 웹 스토리 완성 알림은 제목 `스토리가 완성됐어요`와 본문에 스토리 제목을 표시합니다. 다른 알림은 데이터의 `title`과 `body`를 표시합니다. Android TTL은 전달받은 값에서 4주를 넘지 않게 제한합니다.
+
+`MANYAK_PUSH_MODE=remote`는 스토리 완성의 `COMPLETED` 마킹과 같은 트랜잭션에 `push_outbox`를 기록합니다. 기본 `local`은 서버 안 FCM 발송을 사용하고 아웃박스를 만들지 않습니다. remote의 동의와 토큰 확인은 알림 서비스가 발송 직전에 수행합니다. 기존 HTTP 발송 클라이언트와 `manyak.push.notification.*` 설정은 제거했습니다.
+
+원격 모드에서는 출석 리마인드와 프로모션 요청도 회원마다 같은 아웃박스에 기록합니다. 회차의 요청은 한 트랜잭션으로 커밋합니다. 출석은 `attendance:{회원 공개 식별자}:{KST 날짜}`, 프로모션은 `promotion:{캠페인 공개 식별자}:{회원 공개 식별자}` 키로 중복 기록을 막습니다. 출석 요청의 `expiresAt`은 당일 KST 자정입니다. 이프 만료 예정 안내는 회원별 만료 기한을 씁니다. 소비자는 발송 직전에 자격을 다시 확인하고 야간 여부를 판정합니다. 로컬 모드는 서버 발송기를 씁니다. 출석 회차가 자정에 도달하면 남은 회원에게는 보내지 않습니다.
+
+회차가 시작되면 서버는 출석 리마인드와 광고(`MARKETING`) 캠페인의 제목 앞에 `(광고)`를 붙입니다. 본문 끝에는 `\n수신거부: 마이 > 알림 설정`을 붙입니다. 끝 공백을 뺀 본문이 이미 안내로 끝나면 다시 붙이지 않습니다. 원격 모드와 로컬 모드는 같은 최종 본문을 씁니다. 서비스(`SERVICE`) 캠페인과 서비스 알림에는 붙이지 않습니다. 템플릿과 캠페인의 본문 입력 제한 300자는 안내를 뺀 길이입니다. 회원 알림함에는 광고 표기와 안내를 붙이기 전의 원문 제목과 본문을 저장합니다. 안내는 아웃박스 요청과 로컬 FCM의 푸시 데이터에만 넣습니다. `MANYAK_PUSH_ATTENDANCE_REMINDER_BODY`에도 안내를 뺀 문구를 넣습니다.
+
+회차 로그의 `targets`는 조회 대상 수이며, `sent`는 원격 모드의 신규 요청 수(로컬 모드는 발송기 호출 수)입니다. `skipped`는 기록하지 않고 캠페인의 `skipped_count`도 사용하지 않습니다. 실패한 캠페인은 원인 해결 후 같은 행을 `SCHEDULED`로 되돌려 재실행할 수 있습니다. 기존 요청은 추가되지 않으며 마지막 회차의 대상 수와 신규 요청 수를 남깁니다. 이 경우 `finished_at` 등 이전 회차 결과는 종료 시 갱신됩니다.
+
+배포 전 알림 서비스의 큐 메시지가 `expiresAt`, `ATTENDANCE_REMINDER`, `PROMOTION`을 지원하는지 확인하고 소비자를 먼저 배포합니다. 서버 안 발송기와 FCM 자격 증명은 로컬 모드 롤백에 사용합니다.
+
+remote 발행 어댑터는 활성 프로파일에 따라 선택합니다.
+
+- **local 프로파일은 Kafka**를 사용합니다. 브로커 주소는 `SPRING_KAFKA_BOOTSTRAP_SERVERS`에 넣습니다(호스트 실행 기본 `localhost:9092`). compose에서는 서버가 접근할 수 있는 브로커 listener 주소를 씁니다. 토픽은 `push.requested`, 키는 회원 `publicId`입니다.
+- **dev, prod 프로파일은 SQS 표준 큐**를 사용하며 메시지 키와 그룹 ID를 설정하지 않습니다. `MANYAK_PUSH_QUEUE_URL`은 필수이며 누락되거나 공백이면 기동에 실패합니다. `AWS_REGION`의 기본값은 `ap-northeast-2`입니다. 자격증명은 AWS SDK 기본 체인을 사용하므로 실행 환경에 붙은 IAM 역할로 발행합니다.
+
+코드의 기본 모드는 `local`입니다. dev와 운영 환경에는 `MANYAK_PUSH_MODE=remote`와 큐 URL을 넣어 원격 모드를 씁니다. `local`은 서버 안 발송기로 돌아가는 롤백 경로입니다.
+
+`manyak.push.outbox.*` 설정은 `application.yml`에서 관리합니다. 기본값은 폴링 2초, 배치 100개, 임대 60초, 배치 전송 제한 20초, 실패 백오프 5초~5분, 포기 기준 24시간입니다. 릴레이는 내부 전용 단일 스레드 스케줄러에서 실행하므로 브로커 대기가 다른 정기 작업을 막지 않습니다. 이 스케줄러는 빈으로 노출하지 않습니다. 그래서 기본 스케줄러와 `@Async` 실행기 선택에 영향을 주지 않습니다.
+
+브로커별 전송 제한은 다음과 같습니다. 두 어댑터 모두 브로커 호출 제한보다 배치 전송 제한이 길어야 하며, 배치 전송 제한보다 임대가 길어야 합니다. 이 관계는 기동 시 검증합니다.
+
+- **SQS**: SDK 전체 호출 제한은 10초(`apiCallTimeout`), 개별 시도 제한은 5초(`apiCallAttemptTimeout`)입니다. 기본 관계는 `시도 5초 < SDK 호출 10초 < 배치 전송 제한 20초 < 임대 60초`입니다.
+- **Kafka에만 적용**: 메타데이터 대기는 최대 1초, delivery 제한은 15초입니다. 배치 전송 제한은 두 시간의 합인 16초보다 길어야 합니다.
+
+발행 결과는 `manyak.push.outbox.result` 카운터의 `published`, `retry`, `abandoned` outcome으로 관측합니다. DB 완료 기록 전 장애에는 중복 발행될 수 있으므로 소비자의 `messageId` 멱등 처리가 필요합니다. 수동 검증은 [remote 발행](../http/push/push-mode-remote.http)을 따릅니다.
+
+`MANYAK_LEGAL_TERMS_VERSION`(기본 `v1.4`)과 `MANYAK_LEGAL_PRIVACY_VERSION`(기본 `v1.8`)은 동의 API의 현행 문서 버전입니다. 문서를 개정하면 웹 원문의 버전과 같은 릴리스에서 바꿉니다. 만 14세 이상 확인 버전은 `1`로 고정합니다. 미동의 상태를 막는 서버 API는 없습니다.
+
+`MANYAK_INTERNAL_SHARED_SECRET`은 내부 발송 자격 조회의 공유 시크릿입니다(`manyak.internal.shared-secret`). 기본값은 빈 문자열이며 비어 있으면 `/internal/**` 요청에 404를 반환합니다. 설정된 경우 `X-Manyak-Internal-Secret` 헤더가 일치해야 하고, 사용자 Bearer 토큰은 내부 인증에 사용하지 않습니다. 수동 검증은 [발송 자격 조회](../http/internal/push-eligibility.http)를 따릅니다.
+
+실제 비밀번호나 로컬 전용 설정 파일은 커밋하지 않습니다.
+
+## 엔드포인트
+
+- Actuator 상태 확인: `GET /actuator/health`
+- Actuator 활성 상태: `GET /actuator/health/liveness`
+- Actuator 준비 상태: `GET /actuator/health/readiness`
+- OpenAPI JSON: `GET /v3/api-docs`
+- Swagger UI: `GET /swagger-ui.html`
+
+공개 비즈니스 API는 `/api/v1` prefix를 씁니다. 내부 API `GET /internal/users/{publicId}/push-eligibility`는 별도 prefix가 없습니다. 이 API는 `kind`와 `at`을 필수로 받습니다. 공개 OpenAPI 문서에는 넣지 않습니다.
+
+## 스키마 문서
+
+DB 스키마 문서는 [tbls](https://github.com/k1LoW/tbls)로 **실 DB에서 자동 생성**합니다. 기준은 Flyway 마이그레이션입니다. 문서는 마이그레이션을 적용한 DB에서 만듭니다.
+
+- **현행 스키마**: `dbdoc/`(tbls 자동 생성, ER 다이어그램 포함). 직접 고치지 않습니다.
+- **목표(설계) 스키마**: `docs/schema-roadmap.sql`(직접 관리, 새 기능 설계 때 갱신). ERDCloud는 더 관리하지 않습니다.
+
+스키마(마이그레이션)를 바꾸면 문서를 재생성해 함께 커밋합니다. `tbls diff` CI(`.github/workflows/db-docs.yml`)가 마이그레이션 변경 시 문서 드리프트를 차단합니다.
+
+```bash
+brew install tbls          # 최초 1회
+./scripts/gen-db-docs.sh   # Docker 실행 + .env 필요
+```
+
+## 팀 위키
+
+팀 LLM 위키와 공통 하네스는 manyak-server와 같은 상위 디렉터리에 둡니다.
+
+```bash
+(
+  cd ..
+  git clone https://github.com/KIM-N-KANG/llm-wiki.git
+  git clone https://github.com/KIM-N-KANG/knk-harness.git
+  git -C llm-wiki pull
+  git -C knk-harness pull
+)
+```
+
+- 팀 위키: `../llm-wiki`
+- 팀 LLM 하네스: `../knk-harness`
+- 서버 레포 LLM 지침: `AGENTS.md`
+
+## 기능 메모
+
+이 절은 하네스 스펙에 정의된 기능을 운영할 때 자주 찾는 값을 모았습니다.
+
+### 이프 만료 예정 안내
+
+기준 문서: [NOTIFICATION 백엔드 파이프라인](https://github.com/KIM-N-KANG/knk-harness/blob/dev/docs/spec/NOTIFICATION/BACKEND/4-1-PIPELINES.md)
+
+푸시와 알림함의 이프 만료 예정 링크는 `/my/credits?tab=history`입니다. 이 링크는 내역 탭을 엽니다. 기존 UTM 규칙은 그대로 씁니다. 출석 리마인드는 `/my/credits?tab=free`를 씁니다.
+
+매일 10:00 KST에 `now < expires_at <= now + 24h`이고 `remaining > 0`인 로트가 있는 활성 회원을 조회합니다. 회원별 조회 창에서 가장 늦은 만료 시각을 `expiresAt`으로 씁니다. 무기한 승계 로트는 제외합니다. `CREDIT_EXPIRY_REMINDER`는 SERVICE이며 광고 동의와 광고 표기가 없습니다. 데이터에는 `type`, `title`, `body`, `deepLink`와 발송기가 더하는 `recipientId`만 있습니다. 금액, 수량, 만료 시각은 넣지 않습니다.
+
+알림함에는 푸시 설정이나 토큰과 관계없이 ACTIVITY로 기록합니다. 원격 모드에서는 대상 회원 전원의 푸시 요청을 같은 회차 트랜잭션에 기록합니다. 소비자는 발송 직전에 서비스 설정과 토큰을 다시 확인합니다. 두 모드 모두 커밋 뒤 알림함 대상 전체에 7일 쿨다운을 겁니다. 로컬 모드는 쿨다운 기록 뒤 트랜잭션 밖에서 자격을 다시 확인하고 발송기를 호출합니다. Redis 조회에 실패하면 기록 전에 멈춥니다. 커밋 뒤 쿨다운 저장에 실패하면 요청은 그대로 두고 회차 실패를 기록합니다.
+
+- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_ENABLED`: 기본 `true`
+- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_CRON`: 기본 `0 0 10 * * *`, KST
+- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_TITLE`: 기본 `이프 만료 예정 안내`
+- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_BODY`: 기본 `곧 만료되는 이프가 있어요`
+
+관리자는 `/api/v1/admin/push/templates/credit_expiry_reminder`에서 문구를 조회(GET), 변경(PUT), 기본값 복원(DELETE)할 수 있습니다. 금액, 수량, 충전이나 이용 권유 문구는 넣지 않습니다. 발송 시각을 옮기면 만료 창이 겹치거나 비는 구간이 생깁니다. 배포 순서는 알림 서비스 → 서버(V114 마이그레이션 포함) → 관리자 웹입니다.
+
+### 관리자 스토리 공개 중단
+
+기준 문서: [MODERATION 백엔드 파이프라인](https://github.com/KIM-N-KANG/knk-harness/blob/dev/docs/spec/MODERATION/BACKEND/4-1-PIPELINES.md)
+
+관리자 토큰으로 `POST /api/v1/admin/moderation/stories/{storyId}/takedown`을 호출합니다. 사유 분류 `reasonCode`는 `SEXUAL_CONTENT`, `COPYRIGHT_INFRINGEMENT`, `HATE_SPEECH`, `ETC`이며 기타일 때만 `reasonDetail`(1~100자)이 필수입니다. 선택 메모 `memo`(1~500자)는 감사 로그에만 남깁니다.
+
+공개 중단은 스토리를 비공개로 바꿉니다. 대기 중이거나 보류 중인 수정 제출본은 `STORY_TAKEN_DOWN` 실패로 끝냅니다. 이후 소유자의 수정이 검수를 통과하면 중단 표시를 지웁니다. 중단 상태에서 공개 범위만 PUBLIC으로 바꾸면 바로 공개하지 않고 202 검수 접수로 응답합니다.
+
+탈퇴하지 않은 소유자에게는 같은 트랜잭션에서 활동 알림 내역을 기록합니다. 푸시는 SERVICE 설정을 따릅니다. **알림 서비스의 `STORY_TAKEN_DOWN` 허용을 서버보다 먼저 배포**해야 합니다. 수동 검증은 [공개 중단 요청](../http/admin/story-takedown.http)을 따릅니다.
+
+공개 중단 알림의 제목 부분은 이름 토큰 치환 뒤 코드포인트 기준 100자까지 씁니다. 100자를 넘으면 앞 99자와 `…`로 줄입니다. 이때 서로게이트 쌍은 보존합니다. 알림 내역과 푸시 본문에 같은 규칙을 적용합니다. 저장된 스토리 제목은 그대로 둡니다.

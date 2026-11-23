@@ -1,179 +1,333 @@
+<div align="center">
+
+<img src="docs/images/manyak-logo.svg" alt="마냑 로고" width="180">
+
 # manyak-server
 
-Manyak 백엔드 서버입니다. Kotlin, Spring Boot, Java 25, Gradle, JPA, Flyway, Security, PostgreSQL을 사용합니다.
+AI 스토리 채팅 서비스 **마냑**의 API 서버
 
-## 로컬 실행
+</div>
 
-PostgreSQL과 Redis를 실행합니다.
+## 목차
 
-```bash
-docker compose up -d
+- [1. 프로젝트 개요](#1-프로젝트-개요)
+  - [1-1. 프로젝트 소개](#1-1-프로젝트-소개)
+  - [1-2. 시스템 구성도](#1-2-시스템-구성도)
+  - [1-3. 주요 기능](#1-3-주요-기능)
+  - [1-4. 개발 환경](#1-4-개발-환경)
+- [2. 개발 결과물](#2-개발-결과물)
+  - [2-1. 백엔드 아키텍처](#2-1-백엔드-아키텍처)
+  - [2-2. 인프라 아키텍처](#2-2-인프라-아키텍처)
+  - [2-3. 데이터베이스 ERD와 마이그레이션](#2-3-데이터베이스-erd와-마이그레이션)
+  - [2-4. API 문서화와 수동 검증](#2-4-api-문서화와-수동-검증)
+  - [2-5. 테스트](#2-5-테스트)
+  - [2-6. 리팩터링](#2-6-리팩터링)
+  - [2-7. CI/CD 파이프라인](#2-7-cicd-파이프라인)
+  - [2-8. 채팅 턴 스트리밍](#2-8-채팅-턴-스트리밍)
+  - [2-9. 알림 파이프라인](#2-9-알림-파이프라인)
+  - [2-10. 검색](#2-10-검색)
+  - [2-11. 이미지 업로드](#2-11-이미지-업로드)
+  - [2-12. 관측과 장애 진단](#2-12-관측과-장애-진단)
+  - [2-13. 부하 테스트](#2-13-부하-테스트)
+  - [2-14. 비용 최적화](#2-14-비용-최적화)
+- [3. 수행 방법](#3-수행-방법)
+  - [3-1. 스펙 주도 개발](#3-1-스펙-주도-개발)
+  - [3-2. 형상 관리와 릴리스](#3-2-형상-관리와-릴리스)
+  - [3-3. AI 에이전트 협업](#3-3-ai-에이전트-협업)
+- [4. 개발 가이드](#4-개발-가이드)
+
+## 1. 프로젝트 개요
+
+### 1-1. 프로젝트 소개
+
+마냑은 사용자가 고른 태그로 AI가 스토리를 생성하는 서비스입니다. 사용자는 그 속의 인물과 채팅하며 스토리를 이어 갑니다. 서비스 주소는 <https://www.manyak.app>입니다.
+
+이 레포는 마냑의 API 서버입니다. 회원과 인증, 스토리 제작과 탐색, 채팅 턴 생성, 이프와 결제, 알림, 관리자 기능을 맡습니다. AI·SW 마에스트로 17기 김앤강 팀이 2026년 6월부터 개발했습니다.
+
+| 레포 | 역할 |
+| --- | --- |
+| [knk-harness](https://github.com/KIM-N-KANG/knk-harness) | 도메인 스펙과 LLM 에이전트의 작업 규칙, 도구 모음(하네스) |
+| [manyak-ai](https://github.com/KIM-N-KANG/manyak-ai) | 스토리와 채팅 턴을 생성하는 AI 서버(Python, FastAPI) |
+| [manyak-notification](https://github.com/KIM-N-KANG/manyak-notification) | 푸시를 보내는 알림 서비스(Kotlin, Spring Boot) |
+| [manyak-web](https://github.com/KIM-N-KANG/manyak-web) | 웹 클라이언트와 BFF(Next.js) |
+| [manyak-android](https://github.com/KIM-N-KANG/manyak-android) | Android 앱 |
+| [manyak-admin](https://github.com/KIM-N-KANG/manyak-admin) | 관리자 페이지 |
+
+### 1-2. 시스템 구성도
+
+![시스템 구성도](docs/images/system-architecture.png)
+
+### 1-3. 주요 기능
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/screen-quick-create-genre.png" width="180" alt="간편 제작 장르 선택"></td>
+    <td align="center"><img src="docs/images/screen-quick-create-protagonist.png" width="180" alt="간편 제작 주인공 설정"></td>
+    <td align="center"><img src="docs/images/screen-quick-create-style.png" width="180" alt="간편 제작 화풍 선택"></td>
+    <td align="center"><img src="docs/images/screen-chat-choices.png" width="160" alt="채팅 선택지"></td>
+    <td align="center"><img src="docs/images/screen-realtime-image.png" width="180" alt="채팅 중 실시간 이미지"></td>
+  </tr>
+  <tr>
+    <td align="center">간편 제작: 장르</td>
+    <td align="center">간편 제작: 주인공</td>
+    <td align="center">간편 제작: 화풍</td>
+    <td align="center">채팅 선택지</td>
+    <td align="center">실시간 이미지</td>
+  </tr>
+</table>
+
+- **스토리 제작**: 장르, 주인공, 주변 인물의 태그를 고르면 AI가 스토리라인 세 개를 제안하고, 하나를 고르면 스토리가 완성됩니다.
+- **채팅**: 스토리 속 인물과 턴 단위로 대화합니다. 응답 재생성, 선택지, 실시간 이미지, 특정 턴까지 복사한 새 채팅을 지원합니다.
+- **탐색과 알림**: 홈 섹션, 공개 목록, 검색과 푸시 알림을 제공합니다.
+- **이프와 관리자**: 턴과 이미지 생성에 재화인 이프를 쓰고, 관리자 API로 검수와 운영 지표를 관리합니다.
+
+### 1-4. 개발 환경
+
+- **서버**: Kotlin 2.3.21, Spring Boot 4.1.2, Java 25, Gradle 9.5.1
+- **저장소**: PostgreSQL 16과 Flyway, Redis 7, OpenSearch(nori)
+- **테스트와 문서**: JUnit 5, Testcontainers, ArchUnit, springdoc-openapi, tbls
+- **관측**: OpenTelemetry, Sentry
+
+## 2. 개발 결과물
+
+### 2-1. 백엔드 아키텍처
+
+모듈 사이 의존이 얽히면 한 기능을 고칠 때 다른 기능까지 함께 깨지기 쉽습니다. 그래서 서버는 하나의 애플리케이션을 모듈 14개로 나누고(모듈러 모놀리스), 그 경계를 테스트로 지킵니다. 다른 모듈의 리포지토리나 엔티티를 직접 참조하거나 모듈끼리 순환하면 모듈 경계 테스트(ArchUnit)가 실패하고 빌드가 멈춥니다.
+
+![manyak-server 내부 구조](docs/images/backend-architecture.png)
+
+모듈 사이 화살표는 실제 코드의 의존 방향을 줄여 그린 것입니다. 회원, 스토리, 채팅의 공개 ID는 UUID(`public_id`)이고, 오류 응답에는 `code`, `message`, `details` 등 공통 필드를 둡니다.
+
+### 2-2. 인프라 아키텍처
+
+> 아래 인프라는 두 가용 영역 이중화를 유지한 마지막 구성으로, 2026년 11월 14일 최종 발표 때의 모습입니다.
+
+![클라우드 아키텍처 Ver.6](docs/images/cloud-architecture-v6.png)
+
+Ver.5까지는 트레이스와 지표를 서로 다른 경로로 보냈고, Ver.6에서 OTel Collector 하나로 모았습니다.
+
+<details>
+<summary><b>Ver.1 ~ Ver.5 발전 과정</b></summary>
+
+<br>
+
+**1) Ver.1 첫 운영과 계층 분리**
+
+![클라우드 아키텍처 Ver.1](docs/images/cloud-architecture-v1.png)
+
+EC2 한 대의 Docker Compose에서 server와 ai를 실행하고 퍼블릭, 앱, 데이터 서브넷을 나눴습니다. RDS와 Redis는 처음부터 관리형으로 두었습니다.
+
+**2) Ver.2 컨테이너 운영 전환**
+
+![클라우드 아키텍처 Ver.2](docs/images/cloud-architecture-v2.png)
+
+배포 중에 서비스가 잠시 멈췄습니다. RDS 비밀번호가 바뀌어도 EC2 설정은 그대로라 DB 인증에 실패한 일도 있었습니다. Compose 구성을 ECS 태스크로 옮기고 EC2는 회수했습니다.
+
+**3) Ver.3 서비스 분리**
+
+![클라우드 아키텍처 Ver.3](docs/images/cloud-architecture-v3.png)
+
+푸시 발송이 실패하면 다시 보내지 않았습니다. 발송을 SQS와 별도 알림 서비스로 나누고, AI 서버도 혼자 배포할 수 있게 했습니다.
+
+**4) Ver.4 이중화 계획**
+
+![클라우드 아키텍처 Ver.4](docs/images/cloud-architecture-v4.png)
+
+RDS, Redis, NAT가 모두 한 가용 영역에 있어 그 영역에 장애가 나면 서비스도 멈출 수 있었습니다. 두 가용 영역에 나누는 계획안입니다.
+
+**5) Ver.5 분산 추적과 이중화 적용**
+
+![클라우드 아키텍처 Ver.5](docs/images/cloud-architecture-v5.png)
+
+요청 ID만으로는 채팅 턴 처리가 어디서 멈췄는지 찾지 못했습니다. Data Prepper로 서비스의 트레이스를 모으고, Ver.4의 이중화를 적용했습니다.
+
+</details>
+
+### 2-3. 데이터베이스 ERD와 마이그레이션
+
+손으로 그린 ERD는 스키마가 바뀔 때마다 따로 고쳐야 해서 실제 DB와 어긋나기 쉽습니다. 그래서 스키마 문서는 [tbls](https://github.com/k1LoW/tbls)로 실제 DB에서 만들고, CI가 마이그레이션을 적용한 DB와 문서가 다르면 PR을 막습니다. 전체 ERD와 테이블별 컬럼은 [dbdoc](dbdoc/README.md)에 있습니다.
+
+![핵심 테이블 관계](docs/images/erd-core.png)
+
+그림은 테이블 64개 가운데 핵심 11개의 관계입니다. 도메인별로는 스토리 30개, 채팅 9개, 이프와 결제 7개, 알림 6개, 회원과 인증 5개, 관리자 4개, 그 밖 3개입니다.
+
+### 2-4. API 문서화와 수동 검증
+
+클라이언트가 웹, Android, 관리자 웹 셋이라 API 계약이 어긋나면 여러 곳이 함께 깨집니다. 그래서 명세는 코드에서 만들고, 사람이 직접 눌러 보는 검증 파일도 계약과 함께 고칩니다.
+
+**OpenAPI 명세**
+
+API 183개(앱 93개, 관리자 90개)의 OpenAPI 명세는 springdoc이 코드에서 만듭니다. 관리자 웹은 이 명세로 요청 타입을 생성합니다. 서비스끼리만 쓰는 내부 API는 공유 시크릿으로 보호하고 공개 명세에서 뺍니다.
+
+<img src="docs/images/swagger-ui.png" width="720" alt="Swagger UI에서 Chats 태그를 펼친 화면">
+
+2026-11-21 로컬 서버에서 연 Swagger UI에서 Chats 태그를 펼친 화면입니다. 채팅 생성부터 턴 스트리밍, AI 응답 재생성, 입력 수정까지 메서드와 경로, 한국어 요약을 보여 주며, 아래에서 두 번째인 생성 스트림 재연결은 연결이 끊기거나 채팅 화면에 다시 들어왔을 때 생성 중인 턴을 이어받는 데 씁니다([2-8](#2-8-채팅-턴-스트리밍)). 서버 주소가 상대 경로(`/`)라 이 화면을 연 서버로 바로 요청을 보낼 수 있습니다.
+
+**수동 검증 파일**
+
+엔드포인트를 바꾸면 통합 테스트와 함께 [`http/`](http) 아래 수동 검증 파일(84개)을 고칩니다. IntelliJ HTTP Client로 바로 실행하며, 헬스 체크, 준비 요청, 핵심 검증, 오류 케이스 순서로 상태 코드와 필드를 확인합니다.
+
+### 2-5. 테스트
+
+전체 테스트 3,971개가 모두 통과합니다(2026-11-21 실행). 하네스 스펙의 테스트 케이스 표에 정의된 입력과 기대 결과를 테스트로 옮기고, 대부분 컨트롤러부터 DB 저장까지 확인하는 통합 테스트로 씁니다. PostgreSQL과 OpenSearch 동작은 Testcontainers로 실제 저장소를 띄워 확인합니다. JaCoCo로 잰 커버리지는 라인 96.7%, 분기 83.3%입니다(2026-11-21 측정). CI는 테스트를 돌리는 실행마다 라인과 분기 비율을 실행 요약에 남기고 HTML 보고서를 7일 동안 보관하므로, 외부 서비스 없이 PR마다 커버리지를 확인합니다.
+
+**커버리지 보고서**
+
+<img src="docs/images/coverage-report.png" width="760" alt="JaCoCo 커버리지 보고서 첫 화면(2026-11-21 측정)">
+
+2026-11-21에 전체 테스트를 실행해 만든 JaCoCo 보고서 첫 화면입니다. 표는 테스트가 지나지 않은 명령어가 많은 패키지부터 보여 주며, 상위 16개만 남기고 나머지 84개는 한 행으로 묶었습니다. 볼 곳은 맨 아래 Total 행의 Lines(17,993줄 가운데 테스트가 지나지 않은 595줄, 96.7%)와 분기 비율 83%입니다. 맨 앞 막대와 그 옆 비율 93%는 바이트코드 명령어 기준이라 라인 비율과 다릅니다.
+
+**실행 시간 단축**
+
+테스트가 늘면서 전체 실행에 8분이 넘게 걸려 PR 확인이 느려졌습니다. 통합 테스트끼리 Spring 컨텍스트를 함께 쓰게 해 컨텍스트 기동을 125회에서 23회로 줄이고([#480](https://github.com/KIM-N-KANG/manyak-server/pull/480)), PostgreSQL 컨테이너는 JVM마다 한 번만 띄워 클래스마다 DB를 복제하게 했습니다([#481](https://github.com/KIM-N-KANG/manyak-server/pull/481)). 전체 실행 시간은 496초에서 196초로 60% 줄었습니다.
+
+### 2-6. 리팩터링
+
+모듈 경계 규칙을 테스트로 강제하려고 보니 위반이 이미 수백 건 쌓여 있었습니다. 그래서 위반을 세는 테스트를 먼저 넣고, 위반이 늘지 않게 막은 채 하나씩 줄였습니다. 다른 모듈의 리포지토리와 엔티티를 참조하던 268곳, 모듈 사이 순환 47건, `global`의 도메인 의존 22건을 모두 없앴습니다([#482](https://github.com/KIM-N-KANG/manyak-server/pull/482) 기준선, [#539](https://github.com/KIM-N-KANG/manyak-server/pull/539) 마지막 정리). 이제 위반이 하나라도 생기면 빌드가 실패합니다.
+
+<details>
+<summary><b>리팩터링 예: 의존 방향 뒤집기</b></summary>
+
+<br>
+
+story 모듈이 누적 턴 수를 세려고 chat 모듈의 리포지토리를 직접 불렀습니다. story가 인터페이스를 정의하고 chat이 구현하게 바꿔 `story → chat` 의존을 없앴습니다. 동작은 그대로입니다([#484](https://github.com/KIM-N-KANG/manyak-server/pull/484)).
+
+**변경 전**
+
+```kotlin
+// story/service/StoryService.kt
+import com.knk.manyak.chat.repository.StoryChatRepository
+
+turnCount = storyChatRepository.sumTurnCountByStoryId(story.id),
 ```
 
-서버를 실행합니다.
+**변경 후**
 
-```bash
-./gradlew bootRun
+```kotlin
+// story/service/StoryTurnCounts.kt
+interface StoryTurnCounts {
+    fun countByStoryId(storyId: Long): Long
+    // 여러 스토리를 한 번에 세는 메서드는 생략
+}
+
+// chat/service/ChatStoryTurnCounts.kt
+@Component
+class ChatStoryTurnCounts(private val storyChatRepository: StoryChatRepository) : StoryTurnCounts {
+    // chat의 리포지토리로 세는 구현은 생략
+}
+
+// story/service/StoryService.kt
+turnCount = storyTurnCounts.countByStoryId(story.id),
 ```
 
-테스트를 실행합니다.
+</details>
 
-```bash
-./gradlew test
-```
+### 2-7. CI/CD 파이프라인
 
-## 로컬 관측 스택 (선택)
+머지할 때마다 테스트, 이미지 빌드, 배포를 손으로 하면 빠뜨리는 단계가 생기고, 늦게 끝난 옛 빌드가 최신 배포를 덮을 수도 있습니다. 그래서 GitHub Actions가 테스트 뒤 amd64와 arm64 이미지를 만들어 배포하고, dev와 main의 배포 잡은 각 브랜치의 최신 커밋만 배포합니다. 릴리스 PR이 main에 머지될 때 같은 코드로 성공한 dev 실행이 있으면 테스트를 다시 돌리지 않고 이미지만 새로 만듭니다.
 
-로그 파이프라인(Fluent Bit → OpenSearch)을 학습·검증할 때만 띄웁니다. 평소 개발에는 필요 없습니다.
+![CI/CD 파이프라인](docs/images/cicd-pipeline.png)
 
-```bash
-docker compose -f docker-compose.observability.yml up -d
-```
+**실행 화면**
 
-- OpenSearch: <http://localhost:9200>
-- OpenSearch Dashboards: <http://localhost:5601>
+<img src="docs/images/cicd-actions-run.png" width="640" alt="GitHub Actions 실행 화면(dev 푸시)">
 
-내릴 때는 `down`, 색인 데이터까지 지우려면 `down -v`를 씁니다.
+2026-11-13 dev 푸시 한 번의 실행입니다. 테스트와 이미지 빌드 잡이 끝나면 dev 배포 잡만 돌고, 운영 배포 잡은 main 푸시가 아니어서 건너뜁니다.
 
-```bash
-docker compose -f docker-compose.observability.yml down
-```
+### 2-8. 채팅 턴 스트리밍
 
-이 스택은 `manyak-observability` 프로젝트로 분리돼 있어 평소 개발용 `docker compose up -d`(postgres·redis)와 서로 간섭하지 않습니다. 보안 플러그인을 끈 **로컬 학습 전용** 구성이므로 그대로 운영에 쓰지 않습니다.
+AI 응답이 끝나기까지 10초 안팎이 걸려, 그사이 사용자가 앱을 닫거나 다른 기기에서 다시 보낼 수 있습니다. 그래서 생성 작업과 클라이언트 연결을 나눴습니다. 생성 작업은 모든 SSE 이벤트를 Redis Stream에 기록하고, 첫 연결과 재연결은 같은 스트림을 처음부터 읽습니다. 앱을 닫았다 열어도 새 AI 호출이나 과금 없이 생성 중인 턴을 이어받습니다.
 
-### 대화 요약 결과 지표
+![채팅 턴 스트리밍 순서](docs/images/chat-turn-sequence.png)
 
-`manyak.chat.compact.result` Counter는 `outcome` 태그로 `saved`, `discarded`, `failed`, `disabled`를 집계합니다. 저장·폐기·실패는 기존 `chat_compact_*` 결과 로그와 같은 시점에 1 증가합니다.
+채팅마다 생성 중 키를 하나만 두고 요청의 마지막 턴 ID도 맞춰 보므로, 두 기기에서 동시에 보내도 턴이 겹치지 않습니다. 이프는 생성 전에 차감하고, 턴을 저장하지 못하면 차감을 환불하고 체험 횟수도 되돌립니다.
 
-`MANYAK_CHAT_COMPACT_ENABLED=false`이면 이어쓰기 커밋의 완료 턴 수가 `MANYAK_CHAT_COMPACT_INTERVAL_TURNS`(기본 10)의 배수일 때만 `disabled`가 1 증가합니다. 재생성과 롤백은 세지 않으며 요약을 요청하지 않습니다. 첫 증가도 감지하도록 기동 시 `disabled` 시계열을 0으로 등록합니다. 지표 전송을 켠 환경에서만 AMP로 전송하며 알림 규칙은 Terraform에서 관리합니다.
+### 2-9. 알림 파이프라인
 
-## 환경변수
+알림을 커밋 뒤에 바로 보내면, 그사이 서버가 멈추거나 발송이 실패할 때 알림이 사라집니다. 그래서 발송 요청을 도메인 변경과 같은 트랜잭션에 아웃박스 행으로 기록하고, 릴레이가 이를 선점해 SQS로 발행합니다. 실패한 행은 간격을 늘려 다시 보내고, 24시간이 지나면 포기로 기록합니다.
 
-로컬 실행에도 DB 접속 환경변수가 필요합니다. `.env.example`에 필요한 변수 목록이 정리되어 있습니다.
+![알림 파이프라인](docs/images/notification-pipeline.png)
 
-`docker compose`는 현재 디렉터리의 `.env` 파일을 자동으로 읽습니다. Spring Boot를 IntelliJ에서 실행할 때는 Run Configuration의 Environment variables에 값을 직접 넣습니다.
+릴레이가 완료를 기록하기 전에 멈추면 같은 메시지가 두 번 갈 수 있어, 알림 서비스가 메시지 ID로 처리 중 선점을 해서 같은 메시지의 중복 처리를 줄입니다. 요청의 추적 헤더를 큐 메시지에 실어, 어느 요청이 어떤 푸시를 만들었는지 한 트레이스에서 봅니다.
 
-필요한 환경변수는 다음과 같습니다.
+### 2-10. 검색
 
-```bash
-MANYAK_DB_URL=jdbc:postgresql://localhost:<MANYAK_DB_PORT>/<MANYAK_DB_NAME>
-MANYAK_DB_USERNAME=<DB 사용자>
-MANYAK_DB_PASSWORD=<DB 비밀번호>
-MANYAK_REDIS_PORT=6379
-MANYAK_AI_BASE_URL=http://localhost:8000
-MANYAK_CORS_ALLOWED_ORIGINS=http://localhost:3000,http://192.168.0.12:3000
-MANYAK_SLACK_FEEDBACK_WEBHOOK_URL=https://hooks.slack.com/services/T000/B000/XXXX
-MANYAK_ANALYTICS_DEVICE_ID_PEPPER=optional-random-pepper
-MANYAK_ANALYTICS_AMPLITUDE_ENABLED=false
-MANYAK_AMPLITUDE_API_KEY=optional-amplitude-project-key
-```
+한국어 제목과 인물 이름을 형태소 단위로 찾으려고 OpenSearch와 nori 분석기를 씁니다. 제목, 한 줄 소개, 장르, 인물 이름을 색인하고 제목에는 가중치를 더 줍니다. 스토리가 바뀌면 커밋 뒤에 색인하고, 매일 한 번 전체를 다시 색인해 놓친 변경을 바로잡습니다.
 
-`MANYAK_AI_BASE_URL`에는 반드시 `http://` 또는 `https://` scheme까지 포함합니다.
-`MANYAK_CORS_ALLOWED_ORIGINS`는 쉼표로 구분하며, 각 origin에는 scheme과 port를 포함합니다.
-`MANYAK_SLACK_FEEDBACK_WEBHOOK_URL`은 선택값입니다. 설정하면 피드백 등록 시 해당 Slack Incoming Webhook으로 알림을 보내고, 비워 두면 알림을 건너뜁니다(등록은 정상 동작).
-`MANYAK_ANALYTICS_DEVICE_ID_PEPPER`은 선택값입니다. device_id 해시에 섞는 pepper로, 설정하면 ID 추측 공격을 완화하고 비워 두면 무염 해시를 사용합니다. 전환기 동안 구 `MANYAK_ANALYTICS_ANONYMOUS_ID_PEPPER`도 fallback으로 인식됩니다(KNK-317).
-`MANYAK_ANALYTICS_AMPLITUDE_ENABLED`·`MANYAK_AMPLITUDE_API_KEY`는 서버 분석 이벤트(`server_*`)의 Amplitude 발행 설정입니다(B1, KNK-514). 기본은 off이며, `ENABLED=true`이고 API 키가 있을 때만 발행합니다. 그 외에는 발행 파사드가 no-op이라 로컬·테스트·키 미주입 운영에서 조용히 꺼집니다. 리전이 EU면 `MANYAK_AMPLITUDE_BASE_URL=https://api.eu.amplitude.com`으로 재정의합니다.
-`MANYAK_REDIS_PORT`은 로컬 Redis 컨테이너가 게시할 포트입니다(기본 `6379`). 앱은 기본적으로 `localhost:6379`에 연결하며, `SPRING_DATA_REDIS_HOST`/`SPRING_DATA_REDIS_PORT`로 재정의합니다. 운영에서는 ElastiCache 엔드포인트를 주입합니다.
+![스토리 검색 흐름](docs/images/search-flow.png)
 
-`MANYAK_PUSH_WEB_BASE_URL`은 스토리 완성·출석 리마인드 푸시의 `deepLink`에 쓸 웹 주소입니다(기본 `https://manyak.app`). 개발 웹 주소가 필요한 환경에서는 이 값으로 재정의합니다. 로컬 발송기의 웹 클릭 링크도 `deepLink`가 없으면 이 주소를 사용하고, 아이콘은 `MANYAK_PUSH_WEB_ICON_URL`을 사용합니다. 웹 스토리 완성 알림은 제목 `스토리가 완성됐어요`와 본문에 스토리 제목을 표시하며, 다른 알림은 데이터의 `title`과 `body`를 표시합니다. Android TTL은 전달받은 값을 4주 상한으로 제한합니다.
+검색 결과는 DB에서 지금 노출 조건을 다시 확인하므로, 색인이 늦어도 비공개로 바뀐 스토리는 나오지 않습니다. 검색 저장소가 실패하거나 3초를 넘기면 첫 페이지는 DB에서 제목, 한 줄 소개, 장르로 찾아 응답합니다.
 
-`MANYAK_PUSH_MODE=remote`는 스토리 완성의 `COMPLETED` 마킹과 같은 트랜잭션에 `push_outbox`를 기록합니다. 기본 `local`은 기존 서버 FCM 발송을 유지하고 아웃박스를 만들지 않습니다. remote의 동의·토큰 확인은 알림 서비스가 발송 직전에 수행합니다. 기존 HTTP 발송 클라이언트와 `manyak.push.notification.*` 설정은 제거했습니다.
+### 2-11. 이미지 업로드
 
-원격 모드의 출석 리마인드·프로모션도 회원마다 같은 아웃박스에 요청을 기록합니다. 회차의 요청은 한 트랜잭션으로 커밋하며, 출석은 `attendance:{회원 공개 식별자}:{KST 날짜}`, 프로모션은 `promotion:{캠페인 공개 식별자}:{회원 공개 식별자}`로 중복 기록을 막습니다. 출석 요청의 `expiresAt`은 당일 KST 자정이며, 이프 만료 예정 안내는 회원별 만료 기한을 사용합니다. 자격 재확인과 야간 판정은 소비자가 발송 직전에 수행합니다. 로컬 모드는 서버 발송기를 사용하고 출석 회차가 자정에 도달하면 남은 회원 발송을 중단합니다.
+이미지가 서버를 거치면 큰 파일이 서버의 메모리와 대역폭을 씁니다. 그래서 클라이언트가 서버에서 서명된 URL을 받아 S3에 바로 올리고, 서버는 발급과 확인만 합니다. 이미지가 여러 장인 제출은 S3 확인 요청을 동시에 보내 접수 시간을 2,205\~2,563ms에서 304\~541ms로 줄였습니다([#544](https://github.com/KIM-N-KANG/manyak-server/pull/544)).
 
-출석 리마인드와 광고(`MARKETING`) 캠페인은 회차 시작에 제목 앞 `(광고)`와 본문 끝 `\n수신거부: 마이 > 알림 설정`을 서버가 붙입니다. 끝 공백을 뺀 본문이 이미 안내로 끝나면 중복으로 붙이지 않습니다. 원격·로컬 모드가 같은 최종 본문을 사용하며, 서비스(`SERVICE`) 캠페인과 서비스 알림에는 붙이지 않습니다. 템플릿·캠페인의 본문 입력 제한 300자는 안내를 제외한 길이입니다. 회원 알림함에는 광고 표기와 안내를 추가하지 않은 원문 제목·본문을 저장하고, 안내는 아웃박스 요청과 로컬 FCM의 푸시 데이터에만 붙입니다. `MANYAK_PUSH_ATTENDANCE_REMINDER_BODY`에도 안내를 제외한 문구를 설정합니다.
+![이미지 업로드 순서](docs/images/image-upload-flow.png)
 
-회차 로그의 `targets`는 조회 대상 수이며, `sent`는 원격 모드의 신규 요청 수(로컬 모드는 발송기 호출 수)입니다. `skipped`는 기록하지 않고 캠페인의 `skipped_count`도 사용하지 않습니다. 실패한 캠페인은 원인 해결 후 같은 행을 `SCHEDULED`로 되돌려 재실행할 수 있습니다. 기존 요청은 추가되지 않으며 마지막 회차의 대상 수와 신규 요청 수를 남깁니다. 이 경우 `finished_at` 등 이전 회차 결과는 종료 시 갱신됩니다.
+키를 서버가 정하는 것은 남의 스토리 경로나 프리셋 이미지를 덮어쓰지 못하게 하려는 것이고, 연결할 때 키가 요청자의 경로 아래인지 확인한 뒤에야 S3에 객체 확인 요청(HEAD)을 보내는 것은 다른 사용자의 객체가 있는지 알아내지 못하게 하려는 것입니다. 채팅 실시간 이미지도 AI 서버가 같은 방식으로 올립니다.
 
-배포 전 알림 서비스의 큐 메시지가 `expiresAt`, `ATTENDANCE_REMINDER`, `PROMOTION`을 지원하는지 확인하고 소비자를 먼저 배포합니다. 서버 안 발송기와 FCM 자격 증명은 로컬 모드 롤백에 사용합니다.
+### 2-12. 관측과 장애 진단
 
-remote 발행 어댑터는 활성 프로파일에 따라 선택합니다.
+장애가 나면 서버, AI 서버, 알림 서비스 가운데 어디서 느려졌는지부터 찾아야 합니다. 그래서 요청 처리 로그에 요청 ID와 트레이스 ID를 함께 기록해, 로그에서 그 요청의 트레이스(서버부터 AI 서버, 알림 서비스까지)를 바로 찾게 했습니다. 오류는 Sentry, LLM 호출과 비용은 Langfuse, 사용자 행동은 Amplitude로 확인합니다.
 
-- **local 프로파일은 Kafka**를 사용합니다. `SPRING_KAFKA_BOOTSTRAP_SERVERS`(호스트 실행 기본 `localhost:9092`)를 주입하며 compose에서는 서버가 접근할 수 있는 브로커 listener 주소를 사용합니다. 토픽은 `push.requested`, 키는 회원 `publicId`입니다.
-- **dev/prod 프로파일은 SQS 표준 큐**를 사용하며 메시지 키·그룹 ID를 설정하지 않습니다. `MANYAK_PUSH_QUEUE_URL`은 필수이며 누락되거나 공백이면 기동에 실패합니다. `AWS_REGION`의 기본값은 `ap-northeast-2`입니다. 자격증명은 AWS SDK 기본 체인을 사용하며 ECS에서는 태스크 역할로 발행합니다.
+![관측과 장애 진단](docs/images/observability.png)
 
-기본 모드는 `local`입니다. dev/prod의 remote 전환은 큐·IAM 등 인프라 적용과 알림 소비 어댑터 배포를 준비한 뒤, 별도 PR의 Terraform 변경으로 ECS 태스크에 `MANYAK_PUSH_MODE=remote`를 주입하는 시점에 수행합니다. 큐 URL도 함께 주입해야 합니다.
+그림은 최종 발표 시점의 구성입니다. 서비스의 트레이스, 지표, 로그는 수집 태스크 하나를 거쳐 지표는 Prometheus에, 로그와 트레이스는 OpenSearch에 쌓입니다. 경보는 지표를 보고, 진단 에이전트는 두 저장소를 모두 조회합니다.
 
-`manyak.push.outbox.*` 설정은 `application.yml`에서 관리합니다. 기본 폴링 2초, 배치 100개, 임대 60초, 배치 전송 제한 20초, 실패 백오프 5초~5분, 포기 기준 24시간입니다. 릴레이는 내부 전용 단일 스레드 스케줄러에서 실행하므로 브로커 대기가 다른 정기 작업을 막지 않습니다. 이 스케줄러는 빈으로 노출하지 않아 기본 스케줄러와 `@Async` 실행기 선택을 유지합니다.
+**진단 에이전트**
 
-브로커별 전송 제한은 다음과 같습니다. 두 어댑터 모두 브로커 호출 제한보다 배치 전송 제한이 길어야 하며, 배치 전송 제한보다 임대가 길어야 합니다. 이 관계는 기동 시 검증합니다.
+진단 에이전트는 지표가 기준을 넘어 이상 징후가 감지되면 3분 동안 신호를 더 모은 뒤, LLM이 읽기 전용 도구로 트레이스, 로그, 지표를 조회해 원인을 진단하고 Slack에 보고합니다. 부하 테스트에서 찾은 병목 4건을 각각 두 번씩 진단한 평가에서 3건의 원인을 두 번 모두 맞혔고, 보관한 지표, 로그, 트레이스를 재생한 자료로 진단한 평가(2026-11-15)에서는 나머지 1건(DB CPU 포화)도 다섯 번 모두 맞혔습니다(원인이 맞는지는 운영자가 판정). 진단 한 건의 비용은 0.1\~0.3달러입니다.
 
-- **SQS**: SDK 전체 호출 제한은 10초(`apiCallTimeout`), 개별 시도 제한은 5초(`apiCallAttemptTimeout`)입니다. 기본 관계는 `시도 5초 < SDK 호출 10초 < 배치 전송 제한 20초 < 임대 60초`입니다.
-- **Kafka에만 적용**: 메타데이터 대기는 최대 1초, delivery 제한은 15초입니다. 배치 전송 제한은 두 시간의 합인 16초보다 길어야 합니다.
+**관리자 운영 탭**
 
-발행 결과는 `manyak.push.outbox.result` 카운터의 `published`·`retry`·`abandoned` outcome으로 관측합니다. DB 완료 기록 전 장애에는 중복 발행될 수 있으므로 소비자의 `messageId` 멱등 처리가 필요합니다. 수동 검증은 [remote 발행](http/push/push-mode-remote.http)을 따릅니다.
+<img src="docs/images/admin-ops-storage.png" width="480" alt="관리자 운영 지표 저장소 탭(고정 데이터)">
 
-`MANYAK_LEGAL_TERMS_VERSION`(기본 `v1.4`)·`MANYAK_LEGAL_PRIVACY_VERSION`(기본 `v1.8`)은 동의 API의 현행 문서 버전입니다. 문서 개정 시 웹 원문의 버전과 같은 릴리스에서 변경합니다. 만 14세 이상 확인 버전은 `1`로 고정합니다. 미동의 상태에 대한 서버 API 게이트는 없습니다.
+관리자 페이지의 운영 탭은 RDS, Redis, OpenSearch 같은 인프라 지표를 한곳에 모아 보여 줍니다(화면은 고정 데이터).
 
-`MANYAK_INTERNAL_SHARED_SECRET`은 내부 발송 자격 조회의 공유 시크릿입니다(`manyak.internal.shared-secret`). 기본값은 빈 문자열이며 비어 있으면 `/internal/**` 요청에 404를 반환합니다. 설정된 경우 `X-Manyak-Internal-Secret` 헤더가 일치해야 하고, 사용자 Bearer 토큰은 내부 인증에 사용하지 않습니다. 공개 ALB의 내부 경로 라우팅 제외는 인프라 후속 작업입니다. 수동 검증은 [발송 자격 조회](http/internal/push-eligibility.http)를 따릅니다.
+### 2-13. 부하 테스트
 
-실제 비밀번호나 로컬 전용 설정 파일은 커밋하지 않습니다.
+동시 사용자가 늘 때 어디서 먼저 막히는지 알아야 했습니다. 그래서 운영과 같은 사양의 별도 환경에 운영 DB 스냅샷을 복원해 채팅 부하를 측정했습니다(2026-10-08 \~ 11-03). LLM 대신 응답에 10.4초 걸리는 모의 서버를 두었습니다.
 
-## 엔드포인트
+| 병목 | 수정 | 결과 |
+| --- | --- | --- |
+| 채팅 턴 실행기가 턴을 4개씩만 동시에 실행 | 동시 실행 수를 64로(v0.7.3, 운영 반영) | 수용 인원 25명 → 약 390명<br>100명 턴 p95 70초 → 10.6초 |
+| 400명에서 동시 턴 상한 64 도달 | 상한 128(부하 환경에서 검증) | 실패율 1.9% → 0.4% |
+| 500명에서 AI 서버 CPU가 확장 기준 70%에 못 미침 | 기준 50%(부하 환경에서 검증) | AI 턴 p95 13\~16초 → 12.0\~12.5초 |
+| 목록 집계 쿼리로 DB CPU 포화 | 턴 수를 따로 저장하는 방식으로 바꿀 예정 | 채팅 6.5만 행에서 RDS CPU 96\~99% |
 
-- Actuator 상태 확인: `GET /actuator/health`
-- Actuator 활성 상태: `GET /actuator/health/liveness`
-- Actuator 준비 상태: `GET /actuator/health/readiness`
-- OpenAPI JSON: `GET /v3/api-docs`
-- Swagger UI: `GET /swagger-ui.html`
+### 2-14. 비용 최적화
 
-공개 비즈니스 API는 `/api/v1` prefix를 사용합니다. 내부 API `GET /internal/users/{publicId}/push-eligibility`는 별도 prefix 없이 `kind`와 `at`을 필수로 받으며 공개 OpenAPI 문서에서 제외합니다.
+이중화와 관측을 늘리면서 AWS 비용도 늘었습니다. 그래서 이중화는 그대로 두고 서비스별 7일 사용량에 맞춰 비용을 줄였습니다. 예를 들어 server는 CPU 사용률 p95가 40.5%라 1 vCPU에서 0.5 vCPU로 낮췄습니다. server와 ai는 온디맨드 태스크 하나에 Fargate Spot을 더하고, notification과 진단 에이전트는 Spot으로 실행합니다. 앱 태스크와 RDS, Redis는 Graviton(ARM64)으로 옮겼습니다.
 
-## 스키마 문서
+| 항목 | 줄이기 전(11/02\~11/09 평균) | 줄인 뒤(11/11\~11/15 평균) |
+| --- | --- | --- |
+| 하루 평균(USD) | 18.75 | 13.30(29% 감소) |
+| 30일 환산(USD) | 약 560 | 약 400 |
 
-DB 스키마 문서는 [tbls](https://github.com/k1LoW/tbls)로 **실 DB에서 자동 생성**합니다. Flyway 마이그레이션이 진실원본이고, 문서는 거기서 파생됩니다.
+두 기간 모두 가용 영역 두 곳, Multi-AZ RDS, Redis 복제를 유지했습니다. 금액은 청구 상세의 기간 평균이고 부가가치세는 뺐습니다.
 
-- **현행 스키마**: `dbdoc/` (tbls 자동 생성, ER 다이어그램 포함). 손으로 고치지 않습니다.
-- **목표(설계) 스키마**: `docs/schema-roadmap.sql` (수기, 새 기능 설계 시 갱신). ERDCloud는 유지보수를 중단했습니다.
+## 3. 수행 방법
 
-스키마(마이그레이션)를 바꾸면 문서를 재생성해 함께 커밋합니다.
+### 3-1. 스펙 주도 개발
 
-```bash
-brew install tbls          # 최초 1회
-./scripts/gen-db-docs.sh   # Docker 실행 + .env 필요
-```
+**Reference**: [The AI-native SDLC playbook(Anthropic)](https://claude.com/blog/the-ai-native-sdlc-playbook)
 
-> 최초 도입 시 `dbdoc/` 베이스라인은 Docker가 켜진 환경에서 위 스크립트를 1회 실행해 생성·커밋해야 합니다. 이후 `tbls diff` CI(`.github/workflows/db-docs.yml`)가 마이그레이션 변경 시 문서 드리프트를 차단합니다.
+여러 사람과 LLM 에이전트가 나눠 구현하면 기준이 코드마다 달라지기 쉽습니다. 그래서 기능은 [knk-harness](https://github.com/KIM-N-KANG/knk-harness)의 도메인 스펙에서 시작합니다. 8개 도메인마다 요구사항, 구조, DB 스키마, API 계약, 테스트 케이스 문서가 있고, 스펙 문서는 모두 383개입니다. 코드와 스펙이 다르면 코드를 스펙에 맞추고, 설계를 바꿀 때는 스펙부터 고칩니다. 선택의 이유는 도메인별 결정 기록에 남깁니다.
 
-## 팀 위키
+개발 과정은 위 플레이북을 참고해 정했습니다. 단계마다 다음 단계가 읽을 문서를 버전 관리에 남긴다는 원칙에 따라 스펙과 결정 기록을 knk-harness에 두고, 팀 규칙은 AGENTS.md에, 반복 절차는 에이전트 스킬에 담았습니다. 동시에 일하는 에이전트는 각자 다른 Git worktree에서 작업하고, 운영에서는 지표가 기준을 넘으면 [진단 에이전트](#2-12-관측과-장애-진단)가 원인을 찾습니다.
 
-팀 LLM 위키와 공통 하네스는 manyak-server와 같은 상위 디렉터리에 둡니다.
+### 3-2. 형상 관리와 릴리스
 
-```bash
-(
-  cd ..
-  git clone https://github.com/KIM-N-KANG/llm-wiki.git
-  git clone https://github.com/KIM-N-KANG/knk-harness.git
-  git -C llm-wiki pull
-  git -C knk-harness pull
-)
-```
+![브랜치와 릴리스 흐름](docs/images/branch-flow.png)
 
-- 팀 위키: `../llm-wiki`
-- 팀 LLM 하네스: `../knk-harness`
-- 서버 레포 LLM 지침: `CLAUDE.md`
+기능 브랜치는 `dev`에 Squash로 머지합니다. `dev`에서 만든 `release/vX.Y.Z`는 `main`에 Merge Commit으로 머지하고 태그를 붙이며, `main`에 머지하면 운영 배포가 시작됩니다. `dev`에 아직 내보내면 안 되는 변경이 있는데 운영 수정이 급할 때만 `main`에서 `hotfix/` 브랜치를 만듭니다.
 
-### 이프 만료 예정 안내
+브랜치 이름, 커밋 메시지, PR 제목에 Jira 티켓 키를 넣고, PR은 템플릿(요약, 관련 이슈, 검증, API 변경, 체크리스트)에 맞춰 씁니다. 11개 레포의 머지된 PR 2,218개 제목에 모두 Jira 키가 있고, 완료 티켓의 86%에 연결된 PR이 있습니다. 서버는 78회 릴리스했고 간격의 중앙값은 0.9일입니다(2026-11-21 기준).
 
-푸시와 알림함의 이프 만료 예정 링크는 `/my/credits?tab=history`로 내역 탭을 엽니다. 기존 UTM 규칙은 유지하며, 출석 리마인드는 `/my/credits?tab=free`를 사용합니다.
+### 3-3. AI 에이전트 협업
 
-매일 10:00 KST에 `now < expires_at <= now + 24h`, `remaining > 0` 로트를 가진 활성 회원을 조회합니다. 회원별 창 안 가장 늦은 만료 시각을 `expiresAt`으로 사용하며 무기한 승계 로트는 제외합니다. `CREDIT_EXPIRY_REMINDER`는 SERVICE이며 광고 동의·광고 표기가 없습니다. 데이터에는 `type`, `title`, `body`, `deepLink`, 발송기가 추가하는 `recipientId`만 있고 금액·수량·만료 시각을 넣지 않습니다.
+에이전트에게 맡기는 일이 늘수록 누가 무엇을 하고 사람이 어디서 확인하는지가 분명해야 합니다. 계획과 검수를 맡는 AI 에이전트가 작업 지시서를 쓰고, 구현 에이전트가 브랜치를 만들고 테스트와 PR까지 맡습니다. 두 에이전트는 각자 맡은 단계에서 3-1의 규칙과 스킬을 따릅니다. 구현 에이전트는 스펙의 테스트 케이스를 먼저 테스트 코드로 옮기고, PR 전에는 다른 모델로 로컬에서 코드를 검토합니다. CI를 통과해야 머지하고, 머지와 운영 릴리스는 사람이 승인합니다.
 
-알림함에는 푸시 설정·토큰과 관계없이 ACTIVITY로 기록하고, 원격 모드에서는 대상 회원 전원의 푸시 요청을 같은 회차 트랜잭션에 기록하고 소비자가 서비스 설정·토큰을 재확인합니다. 두 모드 모두 커밋 후 알림함 대상 전체에 7일 쿨다운을 겁니다. 로컬 모드는 쿨다운 기록 뒤 트랜잭션 밖에서 자격을 재확인하고 발송기를 호출합니다. Redis 조회 실패는 기록 전에 중단하고, 커밋 뒤 쿨다운 저장 실패는 요청을 유지하며 회차 실패를 기록합니다.
+## 4. 개발 가이드
 
-- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_ENABLED`: 기본 `true`
-- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_CRON`: 기본 `0 0 10 * * *`, KST
-- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_TITLE`: 기본 `이프 만료 예정 안내`
-- `MANYAK_PUSH_CREDIT_EXPIRY_REMINDER_BODY`: 기본 `곧 만료되는 이프가 있어요`
-
-관리자 `/api/v1/admin/push/templates/credit_expiry_reminder`의 GET/PUT/DELETE로 문구를 조회·변경·기본값 복원합니다. 금액·수량이나 충전·이용 권유 문구를 넣지 않습니다. 발송 시각을 옮기면 만료 창이 겹치거나 비는 구간이 생깁니다. 배포 순서는 알림 서비스 → 서버(V114 마이그레이션 포함) → 관리자 웹입니다.
-
-### 관리자 스토리 공개 중단
-
-관리자 토큰으로 `POST /api/v1/admin/moderation/stories/{storyId}/takedown`을 호출합니다. 사유 분류 `reasonCode`는 `SEXUAL_CONTENT`, `COPYRIGHT_INFRINGEMENT`, `HATE_SPEECH`, `ETC`이며 기타일 때만 `reasonDetail`(1~100자)이 필수입니다. 선택 메모 `memo`(1~500자)는 감사 로그에만 남깁니다.
-
-공개 중단은 스토리를 비공개로 바꾸고 대기·보류 중 수정 제출본을 `STORY_TAKEN_DOWN` 실패로 끝냅니다. 이후 소유자의 수정이 검수를 통과하면 중단 표시를 지웁니다. 중단 상태에서 공개 범위만 PUBLIC으로 바꿔도 즉시 공개하지 않고 202 검수 접수로 응답합니다.
-
-탈퇴하지 않은 소유자에게는 같은 트랜잭션에서 활동 알림 내역을 기록합니다. 푸시는 SERVICE 설정을 따릅니다. **알림 서비스의 `STORY_TAKEN_DOWN` 허용을 서버보다 먼저 배포**해야 합니다. 수동 검증은 [공개 중단 요청](http/admin/story-takedown.http)을 따릅니다.
-
-공개 중단 알림의 제목 부분은 이름 토큰 치환 후 코드포인트 기준 100자까지 사용합니다. 넘으면 앞 99자와 `…`로 줄이며 서로게이트 쌍을 보존합니다. 내역·푸시 본문에 같은 규칙을 적용하고 저장된 스토리 제목은 유지합니다.
+로컬 실행, 환경 변수, 엔드포인트, 스키마 문서 생성 방법은 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)에 있습니다.

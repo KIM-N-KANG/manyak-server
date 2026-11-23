@@ -60,7 +60,7 @@ cd loadtest/mock-llm
 .venv/bin/python -m pytest -q
 # 같은 테스트는 unittest runner로도 실행할 수 있습니다.
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -B validate_ai.py --ai-root /Users/kangkyunghyun/Projects/knk-workspace/manyak-ai --revision origin/dev
+.venv/bin/python -B validate_ai.py --ai-root <워크스페이스>/manyak-ai --revision origin/dev
 ```
 
 검증 스크립트는 `git show`로 선택 리비전의 AI 코드만 읽고 임시 디렉터리에 스키마를 가져와 sys.path로 참조합니다. AI 레포·git·환경 파일을 변경하지 않으며 bytecode도 쓰지 않습니다. SDK·관측 기동을 피하려고 실제 소스 AST에서 순수 파서·검증 함수와 채팅 스트림 함수를 추출해 실행합니다. OpenAI wire 본문·usage, 스토리라인, 컴파일 필수값·인물 0/1/5명·StorySpec, 선택지, 판정, strict/fallback 검수, 화자 이미지 이벤트·저장 마커, 이미지 생성·편집 어댑터의 응답 처리를 검사합니다. SDK 전송과 관측 컨텍스트는 모의 처리하므로 실제 SDK HTTP 통합·업로드·백엔드 연동의 검증은 별도로 필요합니다.

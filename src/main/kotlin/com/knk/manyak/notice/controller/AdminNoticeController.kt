@@ -4,12 +4,14 @@ import com.knk.manyak.adminkit.security.AdminRequester
 import com.knk.manyak.global.observability.SocialAuthPrivacyFilter
 import com.knk.manyak.notice.dto.*
 import com.knk.manyak.notice.service.NoticeService
+import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
 
+@Tag(name = "Admin Notices", description = "관리자 공지 API")
 @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
 @RestController
 @RequestMapping("/api/v1/admin/notices")

@@ -61,3 +61,6 @@ manyak:
     # 스토리 컴파일은 실제 LLM이라 수십 초~2분 걸린다. 로컬 수동 검증에서는 스텁으로 즉답 처리한다(KNK-71).
     story:
       stub: true
+  push:
+    # 로컬 remote 모드는 docker compose의 Kafka로 발행한다(KNK-2125 전에는 local 프로필에 묶여 있었다).
+    broker: ${MANYAK_PUSH_BROKER:kafka}

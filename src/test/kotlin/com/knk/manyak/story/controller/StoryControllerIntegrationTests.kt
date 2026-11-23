@@ -128,7 +128,7 @@ class StoryControllerIntegrationTests : ScriptedAiIntegrationTest() {
     fun `로컬 프론트 개발 서버의 CORS preflight를 허용한다`() {
         listOf(
             "http://localhost:3000",
-            "http://192.168.0.12:3000",
+            "http://10.0.0.12:3000",
         ).forEach { origin ->
             restTestClient.options()
                 .uri("/api/v1/stories/simple/tags")
