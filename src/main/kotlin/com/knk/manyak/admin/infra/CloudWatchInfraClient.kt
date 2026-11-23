@@ -14,6 +14,12 @@ import software.amazon.awssdk.services.cloudwatch.model.*
 import java.time.*
 
 /**
+ * `host`와 `rds` 묶음의 출처(KNK-2126). 기본은 지금처럼 CloudWatch다. OCI 운영 호스트는 AWS 자격이 없어
+ * PROMETHEUS로 두고, 그때는 CloudWatch를 부르지 않고 관측 서버 Prometheus의 기록 규칙 계열로 같은 모양을 채운다.
+ */
+enum class InfraHostSource { CLOUDWATCH, PROMETHEUS }
+
+/**
  * 인프라 지표 설정(ADMIN 6-3). 비어 있는 출처는 부르지 않고 그 묶음을 null로 둔다.
  * Prometheus 계정과 Access 토큰은 시크릿이다. 이 클래스는 data class가 아니라 toString에 값이 나오지 않는다.
  */
@@ -22,7 +28,7 @@ class InfraMetricsProperties(val region: String = "ap-northeast-2", val cacheSec
     val timeoutSeconds: Long = 5, val cooldownSeconds: Long = 60, val databaseCacheSeconds: Long = 300,
     val cacheKeys: Int = 100, val maxRangeDays: Long = 31, val shortRangeDays: Long = 2,
     val mediumRangeDays: Long = 7, val fineRetentionDays: Long = 63, val databaseMaxLimit: Int = 100,
-    val hostAsg: String = "", val database: String = "",
+    val hostSource: InfraHostSource = InfraHostSource.CLOUDWATCH, val hostAsg: String = "", val database: String = "",
     val prometheusUrl: String = "", val prometheusUsername: String = "", val prometheusPassword: String = "",
     val prometheusAccessClientId: String = "", val prometheusAccessClientSecret: String = "",
     val prometheusConnectTimeout: Duration = Duration.ofSeconds(1), val prometheusQueryTimeout: Duration = Duration.ofSeconds(3),

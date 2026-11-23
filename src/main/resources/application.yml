@@ -117,6 +117,8 @@ manyak:
       fine-retention-days: 63
       database-max-limit: 100
       # ADMIN 6-3. 비어 있는 출처는 부르지 않고 그 묶음을 null로 둔다(개발 서버는 Redis 묶음만 응답).
+      # host와 rds 묶음의 출처(KNK-2126). cloudwatch(기본, 지금 운영) 또는 prometheus(OCI 운영 호스트, 관측 서버 기록 규칙).
+      host-source: ${MANYAK_ADMIN_INFRA_HOST_SOURCE:cloudwatch}
       host-asg: ${MANYAK_ADMIN_INFRA_HOST_ASG:}
       database: ${MANYAK_ADMIN_INFRA_RDS_INSTANCE:}
       prometheus-url: ${MANYAK_ADMIN_INFRA_PROMETHEUS_URL:}
