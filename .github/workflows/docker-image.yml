@@ -304,12 +304,14 @@ jobs:
         env:
           DEPLOY_SHA: ${{ steps.gate.outputs.deploy_sha }}
         run: |
-          for i in $(seq 1 80); do
+          # 요청 시간까지 포함해 20분에서 끊는다(동시성 잠금을 그 이상 잡지 않게).
+          DEADLINE=$((SECONDS + 1200))
+          while [ "$SECONDS" -lt "$DEADLINE" ]; do
             COMMIT=$(curl -fsS --max-time 10 https://api.manyak.app/actuator/info | jq -r '.build.commit // empty' || true)
             if [ "$COMMIT" = "$DEPLOY_SHA" ]; then
-              echo "✅ 운영 server 가 $DEPLOY_SHA 로 바뀌었습니다"; exit 0
+              echo "✅ 운영 server 가 $DEPLOY_SHA 로 바뀌었습니다(${SECONDS}초)"; exit 0
             fi
-            echo "교체 대기 $i/80 (지금 ${COMMIT:-응답 없음}, 15s)..."; sleep 15
+            echo "교체 대기 ${SECONDS}s (지금 ${COMMIT:-응답 없음})..."; sleep 15
           done
           echo "::error::20분 안에 운영 server 가 $DEPLOY_SHA 로 바뀌지 않았습니다. 새 컨테이너가 헬스를 못 넘었으면 옛 server 가 계속 서비스합니다(updater 알림과 운영 로그 확인)"
           exit 1
