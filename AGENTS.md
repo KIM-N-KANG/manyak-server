@@ -89,24 +89,23 @@
 ## 배포와 릴리스
 
 - **main push만 프로덕션 배포를 트리거**합니다(`.github/workflows/docker-image.yml`의 `deploy-prod`). dev 머지는 프로덕션에 반영되지 않습니다.
-  - 운영은 EC2 앱 호스트 한 대(태그 `manyak:host=manyak-prod-host`, KNK-2106)입니다.
-  - 빌드 잡이 ECR에 `:<sha7>`를 push합니다. 배포 잡은 직렬화된 구간에서 현재 main HEAD를 배포 대상으로 정하고, 그 이미지가 ECR에 아직 없으면 멈춥니다(그 커밋의 실행이 배포합니다).
-  - SSM 문서 `manyak-prod-host-deploy-server`로 호스트 `deploy.sh`를 부릅니다. 새 컨테이너 헬스 → kamal-proxy 전환 → 옛 컨테이너 드레인(240초) 후 정지입니다. 새 컨테이너가 헬스를 못 넘으면 지워지고 옛 server가 계속 서비스합니다. 출력의 `server: deployed <image>` 줄로 배포를 확인합니다.
-  - `api.manyak.app/actuator/health` 스모크가 실패하면 같은 문서를 `image=rollback`으로 보냅니다. 배포가 끝난 뒤에만 `:latest`를 그 SHA로 옮깁니다.
-  - 되돌리기는 SSM 문서를 `image=rollback`(직전 이미지, 호스트 `/data/state` 기록) 또는 `image=<ECR 이미지>:<sha7>`로 실행하거나, revert 커밋을 릴리스합니다.
-  - OCI 운영 호스트 전환 준비(KNK-2126): 빌드 잡은 main 이미지를 GHCR `ghcr.io/kim-n-kang/manyak-server:<sha7>`에도 같은 빌드로 push합니다. 배포 잡은 AWS 배포와 스모크가 성공한 뒤에만 GHCR `:prod`를 그 SHA로 옮깁니다. OCI 운영 호스트는 `:prod`를 따라 배포하며, 전환 전에는 아무도 받지 않습니다. `:prod` 되돌리기는 수동 워크플로 `prod-rollback.yml`(입력 `sha`, main 커밋만)입니다. AWS 쪽 되돌리기와는 따로입니다.
+  - 운영은 OCI VM 한 대입니다(KNK-2126). 호스트 구성과 설정의 정본은 manyak-terraform `oci/prod`입니다.
+  - 빌드 잡이 GHCR `ghcr.io/kim-n-kang/manyak-server:<sha7>`를 push합니다. 배포 잡은 직렬화된 구간에서 현재 main HEAD를 배포 대상으로 정하고, 그 이미지가 GHCR에 아직 없으면 멈춥니다(그 커밋의 실행이 배포합니다).
+  - 배포 잡은 GHCR `:prod`를 그 SHA로 옮기기만 합니다. CI는 호스트에 들어가지 않습니다. 호스트의 updater(`oci/prod/scripts/update.sh`, 1분 주기)가 `:prod` 다이제스트가 바뀐 것을 보고 `deploy.sh`로 배포합니다. 새 컨테이너 헬스 → kamal-proxy 전환 → 옛 컨테이너 드레인(240초) 후 정지입니다. 새 컨테이너가 헬스를 못 넘으면 지워지고 옛 server가 계속 서비스하며, 그 다이제스트는 다시 시도하지 않습니다.
+  - 배포 잡은 `api.manyak.app/actuator/info`의 `build.commit`이 그 SHA가 될 때까지(최대 20분) 기다린 뒤 `/actuator/health`를 확인합니다. 둘 중 하나가 실패하면 `:prod`를 직전 다이제스트로 되돌립니다.
+  - 되돌리기는 수동 워크플로 `prod-rollback.yml`(입력 `sha`, main 커밋만)로 `:prod`를 직전 릴리스 커밋으로 옮기거나, revert 커밋을 릴리스합니다.
 - **dev push는 dev 환경에 반영**됩니다. dev 브랜치에 머지하면 배포 잡(`deploy-dev`)이 최신 SHA 게이트 뒤에서 GHCR `:<sha7>`를 `:dev`로 옮기고, dev 환경이 그 이미지를 자동으로 받아 교체합니다. 주소는 `dev-api.manyak.app`이고, 잡은 그 헬스를 확인합니다. 옛 dev EC2, SSM 배포, SQS, dev ECR 경로는 없습니다.
 - 머지 규칙: 기능→dev = Squash, `release/vX.Y.Z`→main = **Merge Commit**, release→dev = Rebase 역반영, `hotfix/*`→main = **Merge Commit**, hotfix→dev = Rebase(릴리스 역반영과 같음). main과 dev에 직접 push하지 않습니다(관례).
 - 릴리스 절차: dev에서 `release/vX.Y.Z` 분기 → PR 제목 `[KNK-xxx] Release: vX.Y.Z 배포` → 머지 후 `vX.Y.Z` git 태그. `build.gradle.kts` version은 올리지 않습니다(이미지 태그는 git sha 기반).
 - 긴급 수정: 운영 장애나 보안 문제를 바로 고쳐야 하는데 dev에 아직 운영에 내보낼 수 없는 변경이 있을 때만 `origin/main`에서 `hotfix/KNK-xxx-…`로 분기합니다 → PR 제목 `[KNK-xxx] Hotfix: vX.Y.Z 배포` → main 머지 후 patch 태그 → 곧바로 같은 브랜치를 dev에 반영. 그런 변경이 없으면 위 릴리스 절차로 patch를 냅니다. ([운영 긴급 수정](../knk-harness/docs/operations/DEPLOYMENT.md#7-3-운영-긴급-수정))
 - 릴리스 PR 본문과 릴리스 티켓에는 포함 PR 목록과 별도로 **"코드 외 할 일"** 칸을 둡니다. 설정 켜기, `terraform apply`처럼 이미지 배포만으로 끝나지 않는 작업과 다음 릴리스에 묶기로 한 설정 변경을 적고, 없으면 "없음"이라고 적습니다. 이 칸의 항목이 모두 끝나야 릴리스 티켓을 완료합니다.
-- 기능 설정을 켜거나 끄는 배포는 배포 확인 때 **실행 중인 server 컨테이너의 해당 환경 변수가 의도한 값인지 대조**합니다(운영 호스트의 `/opt/manyak/config/services/server.env`, 또는 SSM으로 `docker inspect`. 값은 출력하지 않고 키와 비밀 아닌 값만 봅니다). 헬스 200만으로 판정하지 않습니다.
+- 기능 설정을 켜거나 끄는 배포는 배포 확인 때 **실행 중인 server 컨테이너의 해당 환경 변수가 의도한 값인지 대조**합니다(설정 정본 manyak-terraform `oci/prod/services/server.env`와 운영 호스트의 `docker inspect`. 값은 출력하지 않고 키와 비밀 아닌 값만 봅니다). 헬스 200만으로 판정하지 않습니다.
 - 와이어 계약(요청과 응답 필드)이 바뀌는 릴리스는 manyak-web, manyak-ai와 **동반 배포**가 필요한지 확인합니다. 반쪽 배포는 런타임 장애로 이어집니다.
-- 비밀값이 대화나 PR에 평문 노출되면 값을 재출력하지 말고 노출 사실을 짚고 재발급을 권합니다. Secrets Manager `put-secret-value`는 전체 덮어쓰기이므로 기존 키를 보존해 머지(jq)합니다.
+- 비밀값이 대화나 PR에 평문 노출되면 값을 재출력하지 말고 노출 사실을 짚고 재발급을 권합니다. 운영 비밀값은 호스트의 `/opt/manyak/secrets/<서비스>.env` 파일에만 있습니다(키 이름은 manyak-terraform `oci/prod/secrets/*.example`).
 
 ## Terraform/IaC 작업
 
 - 운영 인프라(Terraform/IaC)는 `manyak-terraform` 레포로 분리됐습니다(KNK-296). 이 레포에는 IaC 코드를 두지 않으며, terraform 작업, 제약, apply는 그 레포의 지침을 따릅니다.
-- 이 레포에서 알아야 할 최소한: **인프라 정의 변경은 앱 레포 배포 잡으로 반영되지 않고 terraform apply가 필요**합니다.
-  - 운영 컨테이너 환경변수, 시크릿 참조, 헬스체크는 manyak-terraform `envs/prod/app-host.tf`의 `app_host_defs`가 정본입니다. terraform이 호스트 설정(S3)으로 내려보내고, 배포 잡은 이미지 태그만 바꿉니다.
-  - 설정을 바꾼 apply는 다음 배포 때(또는 SSM 문서 `image=current`로 다시 배포할 때) 반영되므로 **apply는 반드시 해당 코드의 main 릴리스 후에** 합니다.
+- 이 레포에서 알아야 할 최소한: **운영 설정 변경은 앱 레포 배포 잡으로 반영되지 않습니다.**
+  - 운영 컨테이너 환경 변수, 헬스체크, 메모리 상한은 manyak-terraform `oci/prod/services/server.env`, `server.healthcmd`, `server.conf`가 정본입니다. 배포 잡은 이미지(`:prod`)만 바꿉니다.
+  - 설정을 바꾸면 manyak-terraform 머지 뒤 호스트에서 `deploy.sh sync`와 `deploy.sh server current`로 반영합니다. 새 코드가 필요한 설정이면 **반드시 해당 코드의 main 릴리스 후에** 반영합니다.
