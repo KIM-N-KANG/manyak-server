@@ -182,8 +182,15 @@ class DevicePushTokenControllerIntegrationTests : IntegrationTest() {
     }
 
     @Test
-    fun `아직 지원하지 않는 IOS도 400이다`() {
-        register(saveUser(), TOKEN_A, platform = "IOS").expectStatus().isBadRequest
+    fun `목록에 없는 DESKTOP은 400이다`() {
+        register(saveUser(), TOKEN_A, platform = "DESKTOP").expectStatus().isBadRequest
+    }
+
+    @Test
+    fun `IOS로 등록하면 204이고 플랫폼 IOS로 저장한다`() {
+        register(saveUser(), TOKEN_A, platform = "IOS").expectStatus().isNoContent
+
+        assertThat(devicePushTokenRepository.findAll().single().platform).isEqualTo(PushPlatform.IOS)
     }
 
     @Test

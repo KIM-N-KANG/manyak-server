@@ -135,6 +135,16 @@ class InternalPushEligibilityControllerIntegrationTests : IntegrationTest() {
     }
 
     @Test
+    fun `iOS 토큰은 플랫폼 IOS로 싣는다`() {
+        val user = saveUser()
+        saveToken(user, "ios-token", PushPlatform.IOS)
+        get(user.publicId, at = NIGHT).expectStatus().isOk.expectBody().json(
+            """{"allowed":true,"reason":"OK","tokens":[{"token":"ios-token","platform":"IOS"}]}""",
+            JsonCompareMode.STRICT,
+        )
+    }
+
+    @Test
     fun `광고 미동의는 서비스 동의 여부와 무관하게 거절한다`() {
         val user = saveUser()
         saveToken(user)

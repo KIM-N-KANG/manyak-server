@@ -41,10 +41,12 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
     @Autowired private lateinit var cleaner: DatabaseCleaner
     private val now = Instant.parse("2026-10-22T13:00:00Z") // KST 야간
     private val sent = mutableListOf<Pair<Long, Map<String, String>>>()
+    // 발송기에 넘긴 Android 우선순위. 발송기는 HIGH를 iOS apns-priority 10, NORMAL을 5로 옮긴다(스펙 4-2-10).
+    private val priorities = mutableListOf<AndroidConfig.Priority>()
     @BeforeEach fun setup() {
-        cleaner.cleanAll(); sent.clear()
+        cleaner.cleanAll(); sent.clear(); priorities.clear()
         doAnswer { call ->
-            assertThat(call.getArgument<AndroidConfig.Priority>(2)).isEqualTo(AndroidConfig.Priority.NORMAL)
+            priorities += call.getArgument<AndroidConfig.Priority>(2)
             sent += call.getArgument<Long>(0) to call.getArgument<Map<String, String>>(1)
             null
         }.`when`(sender).sendToUser(anyLong(), anyMap(), any(AndroidConfig.Priority::class.java) ?: AndroidConfig.Priority.NORMAL, isNull(), isNull(), org.mockito.ArgumentMatchers.any<String>())
@@ -55,7 +57,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
         tokens.save(DevicePushToken(userId = user.id, token = "notice-${user.id}", platform = PushPlatform.ANDROID))
         return user
     }
-    @Test fun `로컬 정보성 공지는 서비스 동의자에게 야간에도 광고 표기 없이 보통 우선순위로 보낸다`() {
+    @Test fun `로컬 정보성 공지는 서비스 동의자에게 야간에도 광고 표기 없이 높은 우선순위로 보낸다`() {
         val target = user("서비스 수신")
         user("서비스 거부", service = false, marketing = true)
         user("정지", status = UserStatus.SUSPENDED)
@@ -68,6 +70,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
         assertThat(jdbc.queryForList("SELECT deep_link FROM user_notifications", String::class.java))
             .containsOnly("https://manyak.app/notices/${notice.publicId}?utm_source=inbox&utm_medium=inbox&utm_campaign=${campaign.publicId}&utm_content=notice")
         assertThat(sent.single().first).isEqualTo(target.id)
+        assertThat(priorities.single()).isEqualTo(AndroidConfig.Priority.HIGH)
         assertThat(sent.single().second).containsEntry("type", "NOTICE").containsEntry("noticeId", notice.publicId.toString())
             .containsEntry("body", "내용").containsEntry("noticeTag", "UPDATE").containsEntry("title", "점검").containsEntry("deepLink", "https://manyak.app/notices/${notice.publicId}?utm_source=push&utm_medium=push&utm_campaign=${campaign.publicId}&utm_content=notice")
     }
@@ -86,6 +89,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
         assertThat(jdbc.queryForList("SELECT deep_link FROM user_notifications", String::class.java))
             .containsOnly("https://manyak.app/notices/${notice.publicId}?utm_source=inbox&utm_medium=inbox&utm_campaign=${campaign.publicId}&utm_content=promotion")
         assertThat(sent.single().first).isEqualTo(target.id)
+        assertThat(priorities.single()).isEqualTo(AndroidConfig.Priority.NORMAL)
         assertThat(jdbc.queryForList("SELECT title FROM user_notifications", String::class.java)).containsOnly(title)
         assertThat(notices.findById(notice.id).orElseThrow().title).isEqualTo(title)
         assertThat(sent.single().second).containsEntry("type", "PROMOTION").containsEntry("noticeId", notice.publicId.toString())
@@ -97,7 +101,7 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
         org.slf4j.MDC.put(com.knk.manyak.global.observability.MdcKeys.REQUEST_ID, "notice-text-test")
         try {
             for (tag in com.knk.manyak.notice.dto.NoticeTag.entries) {
-                sent.clear()
+                sent.clear(); priorities.clear()
                 val notificationTitle = "직접 쓴 알림 제목 ${tag.name}"
                 val notificationBody = "직접 쓴 알림 본문\n줄바꿈 유지"
                 val notice = noticeService.create(target.id, com.knk.manyak.notice.dto.CreateNoticeRequest(
@@ -112,6 +116,8 @@ class NoticePushLocalIntegrationTests : MockedBoundaryIntegrationTest() {
                 val expectedTitle = if (tag.pushKind == PushKind.MARKETING) "(광고) $notificationTitle" else notificationTitle
                 val expectedBody = if (tag.pushKind == PushKind.MARKETING) "$notificationBody\n수신거부: 마이 > 알림 설정" else notificationBody
                 assertThat(sent.single().second).containsEntry("title", expectedTitle).containsEntry("body", expectedBody)
+                assertThat(priorities.single()).isEqualTo(
+                    if (tag.pushKind == PushKind.MARKETING) AndroidConfig.Priority.NORMAL else AndroidConfig.Priority.HIGH)
                 val row = jdbc.queryForMap("SELECT title,body FROM user_notifications WHERE notice_public_id=?", notice.noticeId)
                 assertThat(row["title"]).isEqualTo(notificationTitle); assertThat(row["body"]).isEqualTo(notificationBody)
                 assertThat(notices.findByPublicId(notice.noticeId)!!.title).isEqualTo("원문 제목 ${tag.name}")

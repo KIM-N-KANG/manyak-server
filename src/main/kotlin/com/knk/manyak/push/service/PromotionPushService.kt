@@ -130,7 +130,9 @@ class PromotionPushService(
                     return@forEach
                 }
                 // 한 회원의 발송 실패가 나머지 회차를 끊지 않는다. 개별 토큰 실패는 FcmPushSender가 이미 흡수한다.
-                runCatching { fcmPushSender.sendToUser(userId, deliveryData, AndroidConfig.Priority.NORMAL,
+                // 서비스 캠페인은 높은 우선순위(iOS 즉시 전달), 광고 캠페인은 보통(스펙 4-2-10).
+                val priority = if (campaign.kind == PushKind.SERVICE) AndroidConfig.Priority.HIGH else AndroidConfig.Priority.NORMAL
+                runCatching { fcmPushSender.sendToUser(userId, deliveryData, priority,
                     messageId = "$messagePrefix:${campaign.publicId}:${user.publicId}") }
                     .onSuccess { sent++ }
                     .onFailure { logger.warn("프로모션 푸시 발송에 실패했습니다. (userId={}, error={})", userId, it.javaClass.simpleName) }

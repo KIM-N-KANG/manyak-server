@@ -252,19 +252,21 @@ class FcmPushSenderTest {
     @Test
     fun `광고 재전달도 Android 데이터와 웹 본문에 같은 줄바꿈과 안내를 보존한다`() {
         val web = token(2, "web").apply { platform = PushPlatform.WEB }
-        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "android"), web))
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(token(1, "android"), web, iosToken(3, "ios")))
         val body = "출석하세요\n수신거부: 마이 > 알림 설정"
         val data = mapOf("type" to "ATTENDANCE_REMINDER", "title" to "(광고) 출석", "body" to body)
         repeat(2) { sender.sendToUser(7L, data, AndroidConfig.Priority.NORMAL) }
         val captor = ArgumentCaptor.forClass(Message::class.java)
-        verify(messaging, times(4)).send(captor.capture())
+        verify(messaging, times(6)).send(captor.capture())
         captor.allValues.forEach { message ->
             assertThat(dataOf(message)["body"]).isEqualTo(body)
             fieldOf(message, "webpushConfig")?.let { config ->
                 assertThat((fieldOf(config, "notification") as Map<*, *>)["body"]).isEqualTo(body)
             }
+            fieldOf(message, "apnsConfig")?.let { assertThat(alertOf(message)["body"]).isEqualTo(body) }
         }
         assertThat(captor.allValues.count { fieldOf(it, "webpushConfig") != null }).isEqualTo(2)
+        assertThat(captor.allValues.count { fieldOf(it, "apnsConfig") != null }).isEqualTo(2)
     }
 
     @Test
@@ -338,6 +340,99 @@ class FcmPushSenderTest {
             fieldOf(fieldOf(webpush, "fcmOptions")!!, "link")
         }
         assertThat(links).containsExactly("https://web.example", "https://web.example/stories/abc")
+    }
+
+    private fun iosToken(id: Long, value: String) = token(id, value).apply { platform = PushPlatform.IOS }
+
+    private fun sendIos(sender: FcmPushSender = this.sender, data: Map<String, String>,
+        priority: AndroidConfig.Priority = AndroidConfig.Priority.HIGH, expiresAt: Instant? = null): Message {
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(iosToken(1, "ios")))
+        sender.sendToUser(7L, data, priority, expiresAt = expiresAt)
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging, org.mockito.Mockito.atLeastOnce()).send(captor.capture())
+        return captor.value
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun apsOf(message: Message): Map<String, Any?> =
+        (fieldOf(fieldOf(message, "apnsConfig")!!, "payload") as Map<String, Any?>)["aps"] as Map<String, Any?>
+
+    @Suppress("UNCHECKED_CAST")
+    private fun apnsHeadersOf(message: Message): Map<String, String> =
+        fieldOf(fieldOf(message, "apnsConfig")!!, "headers") as Map<String, String>? ?: emptyMap()
+
+    private fun alertOf(message: Message): Map<String, Any?> = apsOf(message)["alert"]!!.let { alert ->
+        mapOf("title" to fieldOf(alert, "title"), "body" to fieldOf(alert, "body"))
+    }
+
+    @Test
+    fun `iOS 서비스 알림은 데이터와 제목 본문 기본 소리를 싣고 즉시 전달한다`() {
+        val data = mapOf("type" to "STORY_TAKEN_DOWN", "title" to "공개가 중단됐어요", "body" to "사유를 확인해 주세요")
+
+        val message = sendIos(data = data)
+
+        assertThat(dataOf(message)).isEqualTo(data + ("recipientId" to publicId.toString()))
+        assertThat(fieldOf(message, "androidConfig")).isNull()
+        assertThat(fieldOf(message, "webpushConfig")).isNull()
+        assertThat(fieldOf(message, "notification")).isNull()
+        // 배지 숫자, 무음 푸시, 표시 직전 내용 변경 요청, 중요도 상향은 넣지 않는다.
+        assertThat(apsOf(message).keys).containsExactlyInAnyOrder("alert", "sound")
+        assertThat(apsOf(message)["sound"]).isEqualTo("default")
+        assertThat(alertOf(message)).isEqualTo(mapOf("title" to data["title"], "body" to data["body"]))
+        assertThat(apnsHeadersOf(message)).isEqualTo(mapOf("apns-priority" to "10"))
+    }
+
+    @Test
+    fun `iOS 광고 알림은 절전을 고려한 전달로 보낸다`() {
+        val message = sendIos(data = mapOf("type" to "PROMOTION", "title" to "(광고) 선물", "body" to "내용"),
+            priority = AndroidConfig.Priority.NORMAL)
+
+        assertThat(apnsHeadersOf(message)).isEqualTo(mapOf("apns-priority" to "5"))
+        assertThat(apsOf(message).keys).containsExactlyInAnyOrder("alert", "sound")
+    }
+
+    @Test
+    fun `iOS 스토리 완성은 고정 제목과 스토리 제목을 본문으로 표시하고 교체 키가 없다`() {
+        val message = sendIos(data = mapOf("type" to "STORY_COMPLETED", "title" to "스토리"))
+
+        assertThat(alertOf(message)).isEqualTo(mapOf("title" to "스토리가 완성됐어요", "body" to "스토리"))
+        assertThat(apnsHeadersOf(message)).doesNotContainKey("apns-collapse-id")
+        assertThat(dataOf(message)).doesNotContainKey("body")
+    }
+
+    @Test
+    fun `iOS 검수 완료는 데이터의 제목과 본문을 표시하고 회차와 무관하게 제출본 단위 교체 키를 붙인다`() {
+        `when`(repository.findTop10ByUserIdOrderByUpdatedAtDesc(7L)).thenReturn(listOf(iosToken(1, "ios")))
+        val base = mapOf("type" to "STORY_MODERATION_COMPLETED", "submissionId" to "sub-1",
+            "title" to "검수를 통과했어요", "body" to "「스토리」의 등록이 완료됐어요.")
+        sender.sendToUser(7L, base + ("attempt" to "1"), messageId = "story-moderation:sub-1:1")
+        sender.sendToUser(7L, base + ("attempt" to "2"), messageId = "story-moderation:sub-1:2")
+
+        val captor = ArgumentCaptor.forClass(Message::class.java)
+        verify(messaging, times(2)).send(captor.capture())
+        captor.allValues.forEach { message ->
+            assertThat(alertOf(message)).isEqualTo(mapOf("title" to base["title"], "body" to base["body"]))
+            assertThat(apnsHeadersOf(message)).containsEntry("apns-collapse-id", "story-moderation:sub-1")
+        }
+    }
+
+    @Test
+    fun `iOS 유효 기한은 만료 시각의 epoch 초로 보내고 4주를 넘으면 4주 뒤로 제한한다`() {
+        val now = Instant.parse("2026-10-17T09:00:00Z")
+        val fixed = FcmPushSender(messaging, repository, accounts, registry, clock = Clock.fixed(now, ZoneOffset.UTC))
+        val midnight = Instant.parse("2026-10-17T15:00:00Z")
+
+        val attendance = sendIos(fixed, mapOf("type" to "ATTENDANCE_REMINDER", "title" to "(광고) 출석", "body" to "출석"),
+            AndroidConfig.Priority.NORMAL, expiresAt = midnight)
+        assertThat(apnsHeadersOf(attendance)).containsEntry("apns-expiration", midnight.epochSecond.toString())
+
+        val story = sendIos(fixed, mapOf("type" to "STORY_COMPLETED", "title" to "스토리"))
+        assertThat(apnsHeadersOf(story)).doesNotContainKey("apns-expiration")
+
+        val far = sendIos(fixed, mapOf("type" to "CREDIT_EXPIRY_REMINDER", "title" to "안내", "body" to "본문"),
+            expiresAt = now.plus(java.time.Duration.ofDays(60)))
+        assertThat(apnsHeadersOf(far))
+            .containsEntry("apns-expiration", now.plus(java.time.Duration.ofDays(28)).epochSecond.toString())
     }
 
     @Test
