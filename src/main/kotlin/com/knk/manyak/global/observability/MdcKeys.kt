@@ -8,4 +8,6 @@ object MdcKeys {
     const val REQUEST_ID = "request_id"
     const val SESSION_ID = "session_id"
     const val DEVICE_ID_HASH = "device_id_hash"
+    const val PLATFORM = "platform"
+    const val APP_VERSION = "app_version"
 }

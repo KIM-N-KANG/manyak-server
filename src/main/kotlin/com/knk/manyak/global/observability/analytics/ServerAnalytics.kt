@@ -256,8 +256,9 @@ class ServerAnalytics(
             // 웹훅은 기기 식별자를 싣지 않는다. 그 외에는 원본 헤더를 사용하고, 게스트만 unknown으로 폴백한다.
             val rawDeviceId = if (webhook) null else AnalyticsDeviceContext.currentDeviceId()
             val deviceId = rawDeviceId ?: if (userPublicId == null) UNKNOWN else null
-            // 앱 요청은 헤더 유무로 Android를 싣고 버전은 1~50자일 때만 싣는다. 웹훅은 헤더가 없어 생략한다.
-            val appVersion = if (webhook) null else AnalyticsDeviceContext.currentAppVersion()
+            // 플랫폼과 앱 버전은 상관관계 필터가 판정한 MDC 값이다. unknown이면 생략하고 웹훅은 헤더가 없어 생략한다.
+            val platform = if (webhook) null else AMPLITUDE_PLATFORMS[MDC.get(MdcKeys.PLATFORM)]
+            val appVersion = if (webhook) null else MDC.get(MdcKeys.APP_VERSION)?.takeIf { it != UNKNOWN }
             val eventProperties = buildMap {
                 put("is_logged_in", userPublicId != null)
                 requestId?.let { put("request_id", it) }
@@ -272,8 +273,8 @@ class ServerAnalytics(
                     sessionId = sessionId,
                     insertId = "${requestId ?: NO_REQUEST}:$eventType",
                     eventProperties = eventProperties,
-                    platform = appVersion?.let { "Android" },
-                    appVersion = appVersion?.takeIf { it.length in 1..50 },
+                    platform = platform,
+                    appVersion = appVersion,
                 ),
             )
         } catch (e: Exception) {
@@ -284,6 +285,7 @@ class ServerAnalytics(
     private companion object {
         const val UNKNOWN = "unknown"
         const val NO_REQUEST = "noreq"
+        val AMPLITUDE_PLATFORMS = mapOf("ios" to "iOS", "android" to "Android", "web" to "Web")
 
         const val EVENT_STORYLINE_SUCCEEDED = "server_storyCreate_storyGeneration_processed_succeeded"
         const val EVENT_STORYLINE_FAILED = "server_storyCreate_storyGeneration_processed_failed"

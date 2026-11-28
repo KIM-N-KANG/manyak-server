@@ -14,7 +14,7 @@ import org.springframework.web.filter.OncePerRequestFilter
 import java.util.UUID
 
 /**
- * 모든 요청에서 X-Manyak-* 식별자 헤더를 받아 MDC(request_id/session_id/device_id_hash)에 적재하고
+ * 모든 요청에서 X-Manyak-* 식별자 헤더를 받아 MDC(request_id/session_id/device_id_hash/platform/app_version)에 적재하고
  * request_id를 응답 헤더로 echo한다. 이후 모든 로그·Sentry·AI 호출이 같은 request_id로 묶이는 토대(AN-3 §3).
  *
  * 가장 높은 우선순위로 등록해 Spring Security 체인(기본 order -100)보다 먼저 실행되게 한다.
@@ -52,8 +52,13 @@ class RequestCorrelationFilter(
         MDC.put(MdcKeys.REQUEST_ID, requestId)
         MDC.put(MdcKeys.SESSION_ID, rawSessionId ?: UNKNOWN)
         MDC.put(MdcKeys.DEVICE_ID_HASH, forwardedDeviceHash ?: rawDeviceId?.let(deviceIdHasher::hash) ?: UNKNOWN)
+        // 요청 플랫폼(ACCOUNT 결정 22): 플랫폼 헤더의 알려진 값 > 앱 버전 헤더가 있으면 Android(옛 Android 앱) > unknown.
+        // 모르는 값은 헤더가 없는 것으로 보고 요청은 막지 않는다.
+        val appVersion = request.getHeader(HEADER_APP_VERSION)
+        MDC.put(MdcKeys.PLATFORM, request.getHeader(HEADER_PLATFORM)?.takeIf { it in PLATFORMS } ?: appVersion?.let { "android" } ?: UNKNOWN)
+        MDC.put(MdcKeys.APP_VERSION, appVersion?.takeIf { it.length in 1..50 } ?: UNKNOWN)
         try {
-            AnalyticsDeviceContext.with(AnalyticsDeviceContext.Values(rawDeviceId, request.getHeader(HEADER_APP_VERSION))) {
+            AnalyticsDeviceContext.with(AnalyticsDeviceContext.Values(rawDeviceId)) {
                 filterChain.doFilter(request, response)
             }
         } finally {
@@ -102,6 +107,8 @@ class RequestCorrelationFilter(
         const val HEADER_SESSION_ID = "X-Manyak-Session-Id"
         const val HEADER_REQUEST_ID = "X-Manyak-Request-Id"
         const val HEADER_APP_VERSION = "X-Manyak-App-Version"
+        const val HEADER_PLATFORM = "X-Manyak-Platform"
+        private val PLATFORMS = setOf("ios", "android", "web")
         const val UNKNOWN = "unknown"
         private val INTERNAL_API_MATCHER = PathPatternRequestMatcher.withDefaults().matcher("/internal/**")
         private val DEVICE_HASH_PATTERN = Regex("device_hash_[0-9a-f]{16}")
