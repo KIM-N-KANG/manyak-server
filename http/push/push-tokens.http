@@ -3,6 +3,7 @@
 ###
 ### [KNK-1131] 디바이스 푸시 토큰 등록·삭제:
 ###   - PUT    /api/v1/users/me/push-tokens          {token, platform} → 204. 같은 토큰 재등록은 갱신(멱등).
+###     platform은 ANDROID, WEB, IOS(KNK-2171)이고 그 밖의 값은 400입니다.
 ###   - DELETE /api/v1/users/me/push-tokens          {token}            → 204. 없거나 남의 토큰이면 아무 일 없이 204(멱등).
 ###     지울 토큰은 경로가 아니라 본문으로 받습니다 — 경로에 실으면 토큰 원문이 액세스 로그·Sentry breadcrumb에 남습니다.
 ###   - 인증 필수(/users/me/** 는 anyRequest().authenticated()) → 토큰 없으면 401. 게스트는 대상이 아니다.
@@ -196,15 +197,43 @@ Content-Type: application/json
     });
 %}
 
-### 미지원 IOS 등록
+# IOS 검증은 아래 등록, 삭제 순서로 실행합니다(KNK-2171). 저장된 platform은 헤더의 SQL로 IOS인지 확인합니다.
+
+### IOS 등록
 PUT {{baseUrl}}/api/v1/users/me/push-tokens
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "token": "web_manual:APA91bWebToken", "platform": "IOS" }
+{ "token": "ios_manual:APA91bIosToken", "platform": "IOS" }
 
 > {%
-    client.test("미지원 IOS 등록 상태 코드", () => {
+    client.test("IOS 등록 상태 코드", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### IOS 삭제
+DELETE {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "token": "ios_manual:APA91bIosToken" }
+
+> {%
+    client.test("IOS 삭제 상태 코드", () => {
+        client.assert(response.status === 204, `204가 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### (에러) 목록에 없는 DESKTOP 등록 → 400
+PUT {{baseUrl}}/api/v1/users/me/push-tokens
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "token": "desktop_manual:APA91bDesktopToken", "platform": "DESKTOP" }
+
+> {%
+    client.test("DESKTOP 등록은 400이다", () => {
         client.assert(response.status === 400, `400이 아닙니다. actual=${response.status}`);
     });
 %}

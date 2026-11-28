@@ -1,6 +1,9 @@
 package com.knk.manyak.push.service
 
 import com.google.firebase.messaging.AndroidConfig
+import com.google.firebase.messaging.ApnsConfig
+import com.google.firebase.messaging.Aps
+import com.google.firebase.messaging.ApsAlert
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingException
 import com.google.firebase.messaging.Message
@@ -28,6 +31,8 @@ import java.time.Instant
  *
  * - ANDROID는 data 전용 + 시나리오별 우선순위·TTL로 보내 앱이 알림을 조립한다(KNK-1134).
  * - WEB은 data와 webpush notification을 함께 보내 브라우저가 표시한다(KNK-1271).
+ * - IOS는 data와 APNs 알림(제목, 본문, 기본 소리)을 함께 보내 시스템이 표시한다. 우선순위, 만료 시각, 교체 키는
+ *   알림 서비스와 같은 규칙이다(KNK-2171, 스펙 4-2-10).
  * - 모든 데이터에 `recipientId`(수신 회원 public_id)를 덧붙인다(KNK-1220) — 앱이 기기 공유 시 남의 알림을 거른다.
  * - 커밋 뒤에 불러야 한다. 외부 IO라 도메인 트랜잭션 안에서 부르면 롤백돼도 푸시는 이미 나간다.
  * - 정지·탈퇴 계정에는 보내지 않는다. 등록 시점에는 ACTIVE였어도 그 뒤 상태가 바뀌면 남아 있던 토큰으로
@@ -120,7 +125,7 @@ class FcmPushSender(
             val remaining = expiresAt?.let { Duration.between(clock.instant(), it).toMillis() }
             if (remaining != null && remaining <= 0) break
             attempted++
-            when (sendTo(messaging, deviceToken, payload, priority, remaining ?: ttlMillis)) {
+            when (sendTo(messaging, deviceToken, payload, priority, remaining ?: ttlMillis, expiresAt)) {
                 OUTCOME_SUCCESS -> delivered++
                 OUTCOME_FAILURE -> failed++
             }
@@ -145,6 +150,7 @@ class FcmPushSender(
         data: Map<String, String>,
         priority: AndroidConfig.Priority,
         ttlMillis: Long?,
+        expiresAt: Instant?,
     ): String {
         try {
             val builder = Message.builder().setToken(deviceToken.token).putAllData(data)
@@ -166,6 +172,7 @@ class FcmPushSender(
                         .setFcmOptions(WebpushFcmOptions.withLink(data["deepLink"] ?: webBaseUrl))
                         .build(),
                 )
+                PushPlatform.IOS -> builder.setApnsConfig(apnsConfig(data, priority, expiresAt))
             }
             val message = builder.build()
             messaging.send(message)
@@ -208,6 +215,29 @@ class FcmPushSender(
         return OUTCOME_FAILURE
     }
 
+    // 제목과 본문은 웹과 같은 규칙이다. 서비스 알림(HIGH)은 즉시 전달 10, 광고 알림(NORMAL)은 절전을 고려한 5.
+    // 배지, content-available, mutable-content, interruption-level은 넣지 않는다(스펙 4-2-10).
+    private fun apnsConfig(data: Map<String, String>, priority: AndroidConfig.Priority, expiresAt: Instant?): ApnsConfig {
+        val storyCompleted = data["type"] == "STORY_COMPLETED"
+        val alert = ApsAlert.builder()
+            .setTitle(if (storyCompleted) STORY_COMPLETED_TITLE else data["title"])
+            .setBody(if (storyCompleted) data["title"] else data["body"])
+            .build()
+        return ApnsConfig.builder()
+            .setAps(Aps.builder().setAlert(alert).setSound(APNS_DEFAULT_SOUND).build())
+            .putHeader("apns-priority", if (priority == AndroidConfig.Priority.HIGH) "10" else "5")
+            .apply {
+                expiresAt?.let {
+                    val cap = clock.instant().plusMillis(MAX_TTL_MILLIS)
+                    putHeader("apns-expiration", minOf(it, cap).epochSecond.toString())
+                }
+                if (data["type"] == "STORY_MODERATION_COMPLETED") {
+                    data["submissionId"]?.let { putHeader("apns-collapse-id", "story-moderation:$it") }
+                }
+            }
+            .build()
+    }
+
     private fun count(outcome: String) {
         Counter.builder(METRIC_PUSH_SEND_RESULT).tag("outcome", outcome).register(meterRegistry).increment()
     }
@@ -223,9 +253,10 @@ class FcmPushSender(
         const val OUTCOME_UNREGISTERED = "unregistered"
         const val OUTCOME_FAILURE = "failure"
         val OUTCOMES = listOf(OUTCOME_SUCCESS, OUTCOME_UNREGISTERED, OUTCOME_FAILURE)
-        // 알림 서비스와 같은 FCM Android TTL 상한(스펙 5-3-5).
+        // 알림 서비스와 같은 FCM Android TTL과 iOS 만료 시각 상한(스펙 5-3-5).
         private const val MAX_TTL_MILLIS = 28L * 24 * 60 * 60 * 1000
         private const val STORY_COMPLETED_TITLE = "스토리가 완성됐어요"
+        private const val APNS_DEFAULT_SOUND = "default"
         private const val TOKEN_LOG_PREFIX = 12
     }
 }
