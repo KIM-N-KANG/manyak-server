@@ -1,6 +1,10 @@
 package com.knk.manyak.global.error
 
 import com.knk.manyak.global.observability.ApiRequestLoggingFilter
+import com.knk.manyak.global.observability.DeviceIdHasher
+import com.knk.manyak.global.observability.RequestCorrelationFilter
+import com.knk.manyak.global.observability.sentry.SentryMdcEventProcessor
+import jakarta.servlet.FilterChain
 import io.sentry.Sentry
 import io.sentry.SentryEvent
 import io.sentry.SentryOptions
@@ -11,6 +15,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.mock.web.MockHttpServletRequest
+import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.web.HttpMediaTypeNotAcceptableException
 import org.springframework.web.HttpMediaTypeNotSupportedException
 import org.springframework.web.HttpRequestMethodNotSupportedException
@@ -65,6 +70,31 @@ class GlobalExceptionHandlerSentryTests {
         assertThat(event.getTag("endpoint")).isEqualTo("/api/v1/stories/simple")
         assertThat(event.getTag("http_method")).isEqualTo("POST")
         assertThat(event.getTag("error_code")).isEqualTo("RuntimeException")
+    }
+
+    @Test
+    fun `요청 플랫폼과 앱 버전은 500 Sentry 이벤트의 태그로 싣고 판정하지 못하면 싣지 않는다`() {
+        // ACCOUNT 5-5 "요청 플랫폼 Sentry 태그". 상관관계 필터가 채운 MDC를 이벤트 프로세서가 태그로 옮긴다.
+        Sentry.init { options ->
+            options.dsn = "http://test@localhost/1"
+            options.addEventProcessor(SentryMdcEventProcessor())
+            options.beforeSend = SentryOptions.BeforeSendCallback { event, _ -> captured.add(event); null }
+        }
+        val filter = RequestCorrelationFilter(DeviceIdHasher("test-pepper"))
+        val withHeaders = request().apply {
+            addHeader(RequestCorrelationFilter.HEADER_PLATFORM, "ios")
+            addHeader(RequestCorrelationFilter.HEADER_APP_VERSION, "1.0.0")
+        }
+        for (request in listOf(withHeaders, request())) {
+            filter.doFilter(request, MockHttpServletResponse(), FilterChain { req, _ ->
+                handler.handleException(RuntimeException("boom"), req as jakarta.servlet.http.HttpServletRequest)
+            })
+        }
+
+        assertThat(captured).hasSize(2)
+        assertThat(captured[0].getTag("platform")).isEqualTo("ios")
+        assertThat(captured[0].getTag("app_version")).isEqualTo("1.0.0")
+        assertThat(captured[1].tags).doesNotContainKeys("platform", "app_version")
     }
 
     @Test

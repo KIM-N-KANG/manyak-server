@@ -126,3 +126,46 @@ X-Manyak-Request-Id: req_forward_check_1
         client.assert(echoed === "req_forward_check_1", `echo 불일치. actual=${echoed}`);
     });
 %}
+
+### 6. (KNK-2170) 요청 플랫폼 헤더: 알려진 값과 모르는 값 모두 200, 판정 값은 서버 로그에서 확인
+# 응답은 바뀌지 않습니다. 판정 결과는 JSON 로그(prod, dev, jsonlog 프로파일)의 최상위 필드
+# platform, app_version으로만 보입니다. 아래 요청 뒤 서버 로그에서 request_id로 찾아 확인하세요.
+#   - req_platform_ios     → platform=ios, app_version=1.0.0
+#   - req_platform_unknown → platform=unknown, app_version=unknown (모르는 값 desktop은 헤더 없음으로 처리)
+#   - req_platform_legacy  → platform=android, app_version=1.4.0 (플랫폼 헤더 없이 앱 버전만 보내는 옛 Android 앱)
+GET {{baseUrl}}/api/v1/stories/simple/tags
+Accept: application/json
+X-Manyak-Request-Id: req_platform_ios
+X-Manyak-Platform: ios
+X-Manyak-App-Version: 1.0.0
+
+> {%
+    client.test("플랫폼 헤더가 있어도 200이고 request_id를 echo한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+        client.assert(response.headers.valueOf("X-Manyak-Request-Id") === "req_platform_ios", "echo 불일치");
+    });
+%}
+
+### 6-1. 모르는 플랫폼 값도 요청을 거절하지 않는다 → 200
+GET {{baseUrl}}/api/v1/stories/simple/tags
+Accept: application/json
+X-Manyak-Request-Id: req_platform_unknown
+X-Manyak-Platform: desktop
+
+> {%
+    client.test("모르는 플랫폼 값이어도 200을 반환한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}
+
+### 6-2. 플랫폼 헤더 없이 앱 버전만 보내면 Android로 판정한다 → 200
+GET {{baseUrl}}/api/v1/stories/simple/tags
+Accept: application/json
+X-Manyak-Request-Id: req_platform_legacy
+X-Manyak-App-Version: 1.4.0
+
+> {%
+    client.test("앱 버전만 있어도 200을 반환한다", () => {
+        client.assert(response.status === 200, `200이 아닙니다. actual=${response.status}`);
+    });
+%}

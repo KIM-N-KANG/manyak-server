@@ -14,7 +14,7 @@ import java.net.URISyntaxException
 /**
  * 모든 Sentry 이벤트에 MDC 상관관계 식별자를 부착한다.
  *
- * request_id는 검색·필터에 쓰이므로 tag로, 개인정보성 식별자(session_id·device_id_hash)는
+ * request_id, platform, app_version은 검색과 필터에 쓰이므로 tag로, 개인정보성 식별자(session_id·device_id_hash)는
  * context로 싣는다. MdcTaskDecorator가 비동기 워커까지 MDC를 전파하므로 chatSseExecutor에서
  * 캡처한 이벤트도 동일하게 채워진다.
  *
@@ -25,7 +25,9 @@ class SentryMdcEventProcessor : EventProcessor {
 
     override fun process(event: SentryEvent, hint: Hint): SentryEvent {
         scrubRequest(event.request)
-        mdc(MdcKeys.REQUEST_ID)?.let { event.setTag(MdcKeys.REQUEST_ID, it) }
+        for (key in listOf(MdcKeys.REQUEST_ID, MdcKeys.PLATFORM, MdcKeys.APP_VERSION)) {
+            mdc(key)?.let { event.setTag(key, it) }
+        }
 
         val identity = buildMap {
             mdc(MdcKeys.SESSION_ID)?.let { put(MdcKeys.SESSION_ID, it) }

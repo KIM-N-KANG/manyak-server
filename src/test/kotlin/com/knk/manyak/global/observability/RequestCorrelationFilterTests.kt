@@ -221,6 +221,28 @@ class RequestCorrelationFilterTests {
     }
 
     @Test
+    fun `요청 플랫폼 로그 MDC는 플랫폼 헤더 앱 버전 헤더 순으로 판정하고 판정하지 못하면 unknown이다`() {
+        // ACCOUNT 5-5 "요청 플랫폼 로그": (X-Manyak-Platform, X-Manyak-App-Version) -> (platform, app_version)
+        val cases = listOf(
+            Triple("ios", "1.0.0", "ios" to "1.0.0"),
+            Triple("web", null, "web" to "unknown"),
+            Triple(null, "1.4.0", "android" to "1.4.0"),
+            Triple("desktop", null, "unknown" to "unknown"),
+            Triple(null, null, "unknown" to "unknown"),
+            Triple("android", "1".repeat(51), "android" to "unknown"),
+            Triple("desktop", "1.4.0", "android" to "1.4.0"),
+        )
+        for ((platform, appVersion, expected) in cases) {
+            val (mdc, response) = runFilter(request().apply {
+                platform?.let { addHeader(RequestCorrelationFilter.HEADER_PLATFORM, it) }
+                appVersion?.let { addHeader(RequestCorrelationFilter.HEADER_APP_VERSION, it) }
+            })
+            assertThat(mdc[MdcKeys.PLATFORM] to mdc[MdcKeys.APP_VERSION]).isEqualTo(expected)
+            assertThat(response.status).isEqualTo(200)
+        }
+    }
+
+    @Test
     fun `필수 헤더가 없어도 4xx로 막지 않고 체인을 진행한다`() {
         var chainInvoked = false
         val response = MockHttpServletResponse()

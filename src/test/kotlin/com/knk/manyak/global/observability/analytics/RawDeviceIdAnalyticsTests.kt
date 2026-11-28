@@ -137,28 +137,58 @@ class RawDeviceIdAnalyticsTests {
     }
 
     @Test
-    fun `앱 버전 헤더가 있으면 Amplitude 기기 필드에 Android와 앱 버전을 싣는다`() {
-        for ((header, version) in listOf("1.4.0" to "1.4.0", null to null, "1".repeat(51) to null)) {
-            val request = request().apply { header?.let { addHeader(RequestCorrelationFilter.HEADER_APP_VERSION, it) } }
+    fun `요청 플랫폼을 로그인 성공 이벤트의 Amplitude 기기 필드에 싣고 판정하지 못하면 생략한다`() {
+        // ACCOUNT 5-5 "요청 플랫폼": (X-Manyak-Platform, X-Manyak-App-Version) -> (platform, app_version), null은 생략
+        val cases = listOf(
+            Triple("ios", "1.0.0", "iOS" to "1.0.0"),
+            Triple("web", null, "Web" to null),
+            Triple(null, "1.4.0", "Android" to "1.4.0"),
+            Triple("desktop", null, null to null),
+            Triple(null, null, null to null),
+            Triple("android", "1".repeat(51), "Android" to null),
+            Triple("desktop", "1.4.0", "Android" to "1.4.0"),
+        )
+        for ((platform, appVersion, expected) in cases) {
+            val request = request().apply {
+                platform?.let { addHeader(RequestCorrelationFilter.HEADER_PLATFORM, it) }
+                appVersion?.let { addHeader(RequestCorrelationFilter.HEADER_APP_VERSION, it) }
+            }
             filter.doFilter(request, MockHttpServletResponse(), FilterChain { _, _ -> emit(true) })
             val body = payload(events.last())
-            if (header == null) assertThat(body).doesNotContainKeys("platform", "app_version")
-            else assertThat(body["platform"]).isEqualTo("Android")
-            if (version == null) assertThat(body).doesNotContainKey("app_version") else assertThat(body["app_version"]).isEqualTo(version)
+            assertThat(body["platform"] to body["app_version"]).isEqualTo(expected)
+            if (expected.first == null) assertThat(body).doesNotContainKey("platform")
+            if (expected.second == null) assertThat(body).doesNotContainKey("app_version")
             assertThat(events.last().eventProperties).doesNotContainKeys("platform", "app_version")
         }
-        // 워커로 넘긴 작업도 같은 요청의 앱 버전을 쓰고 요청이 끝나면 남지 않는다.
+        // 워커로 넘긴 작업도 같은 요청의 플랫폼과 앱 버전을 쓰고 요청이 끝나면 남지 않는다.
         val executor = Executors.newSingleThreadExecutor()
         try {
             lateinit var task: Runnable
-            filter.doFilter(request().apply { addHeader(RequestCorrelationFilter.HEADER_APP_VERSION, "2.0.0") }, MockHttpServletResponse(), FilterChain { _, _ ->
+            filter.doFilter(request().apply {
+                addHeader(RequestCorrelationFilter.HEADER_PLATFORM, "ios")
+                addHeader(RequestCorrelationFilter.HEADER_APP_VERSION, "2.0.0")
+            }, MockHttpServletResponse(), FilterChain { _, _ ->
                 task = MdcTaskDecorator().decorate { emit(false) }
             })
             executor.submit(task).get(5, TimeUnit.SECONDS)
+            assertThat(payload(events.last())["platform"]).isEqualTo("iOS")
             assertThat(payload(events.last())["app_version"]).isEqualTo("2.0.0")
             emit(false)
             assertThat(payload(events.last())).doesNotContainKeys("platform", "app_version")
         } finally { executor.shutdownNow() }
+    }
+
+    @Test
+    fun `웹훅 이벤트는 요청 플랫폼과 앱 버전을 싣지 않는다`() {
+        // PAYMENT 5-4-9: 웹훅은 헤더가 없어 생략한다. 헤더가 실려 와도 웹훅 경로는 싣지 않는다.
+        val webhook = ServerAnalytics(object : AnalyticsEventPublisher {
+            override fun publish(event: AnalyticsEvent) { events.add(event) }
+        }) { java.util.UUID.randomUUID() }
+        filter.doFilter(request().apply {
+            addHeader(RequestCorrelationFilter.HEADER_PLATFORM, "ios")
+            addHeader(RequestCorrelationFilter.HEADER_APP_VERSION, "1.0.0")
+        }, MockHttpServletResponse(), FilterChain { _, _ -> webhook.paymentPurchaseSucceeded(1L, 1L, "product", 1000, 10) })
+        assertThat(payload(events.single())).doesNotContainKeys("platform", "app_version", "device_id")
     }
 
     @Suppress("UNCHECKED_CAST")
